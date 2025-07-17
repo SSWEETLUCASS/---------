@@ -1,0 +1,5 @@
+Flask
+requests
+openpyxl
+python-docx
+python-dotenv
