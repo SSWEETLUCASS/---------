@@ -37,10 +37,15 @@ TEMPLATE_FIELDS = [
 user_states = {}
 
 # === Получение токена GigaChat ===
+# === Получение токена GigaChat с использованием сертификатов ===
 def get_gigachat_token():
     global token_cache
     if token_cache["access_token"] and token_cache["expires_at"] > datetime.utcnow():
         return token_cache["access_token"]
+
+    cert_path = os.getenv("GIGACHAT_CERT")
+    key_path = os.getenv("GIGACHAT_KEY")
+    ca_path = os.getenv("GIGACHAT_CA")
 
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -49,13 +54,29 @@ def get_gigachat_token():
         'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
     }
     data = {'scope': GIGACHAT_SCOPE}
-    response = requests.post(GIGACHAT_TOKEN_URL, headers=headers, data=data)
-    if response.status_code == 200:
-        result = response.json()
-        token_cache["access_token"] = result['access_token']
-        token_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=result['expires_in'])
-        return token_cache["access_token"]
-    raise Exception("Не удалось получить токен GigaChat")
+
+    cert = (cert_path, key_path)
+    verify = ca_path if ca_path not in [None, "", "false", "False"] else True
+
+    try:
+        response = requests.post(
+            GIGACHAT_TOKEN_URL,
+            headers=headers,
+            data=data,
+            cert=cert,
+            verify=verify
+        )
+        response.raise_for_status()
+    except requests.exceptions.SSLError as e:
+        raise Exception(f"SSL ошибка при подключении к GigaChat: {e}")
+    except Exception as e:
+        raise Exception(f"Ошибка подключения к GigaChat: {e}")
+
+    result = response.json()
+    token_cache["access_token"] = result['access_token']
+    token_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=result['expires_in'])
+    return token_cache["access_token"]
+
 
 # === Проверка идеи через GigaChat ===
 def check_idea_with_gigachat(user_input: str) -> str:
