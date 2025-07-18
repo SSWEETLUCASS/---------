@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # === Настройки ===
-GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
 GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GIGACHAT_TOKEN_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
@@ -36,8 +35,8 @@ TEMPLATE_FIELDS = [
 ]
 user_states = {}
 
-# === Получение токена GigaChat ===
 # === Получение токена GigaChat с использованием сертификатов ===
+# === Получение токена GigaChat с использованием только сертификатов ===
 def get_gigachat_token():
     global token_cache
     if token_cache["access_token"] and token_cache["expires_at"] > datetime.utcnow():
@@ -50,8 +49,8 @@ def get_gigachat_token():
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        'RqUID': str(uuid.uuid4()),
-        'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
+        'RqUID': str(uuid.uuid4())
+        # ❌ Без Authorization
     }
     data = {'scope': GIGACHAT_SCOPE}
 
@@ -198,6 +197,3 @@ async def handler(request):
 logging.basicConfig(level=logging.INFO)
 app = web.Application()
 app.router.add_post("/gigabot", handler)
-
-if __name__ == '__main__':
-    web.run_app(app, port=8080)
