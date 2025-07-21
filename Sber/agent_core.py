@@ -1,3 +1,5 @@
+# agent_core_token.py
+
 import os
 import uuid
 import requests
@@ -12,6 +14,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 load_dotenv()
 
 GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE")
+GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
 GIGACHAT_TOKEN_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 GIGACHAT_API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
@@ -31,29 +34,18 @@ def get_gigachat_token():
     if token_cache["access_token"] and token_cache["expires_at"] > datetime.utcnow():
         return token_cache["access_token"]
 
-    cert_path = os.getenv("GIGACHAT_CERT")
-    key_path = os.getenv("GIGACHAT_KEY")
-    ca_path = os.getenv("GIGACHAT_CA")
-
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        'RqUID': str(uuid.uuid4())
+        'RqUID': str(uuid.uuid4()),
+        'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
     }
     data = {'scope': GIGACHAT_SCOPE}
 
-    cert = (cert_path, key_path)
-    verify = ca_path if ca_path else True
-
-    response = requests.post(
-        GIGACHAT_TOKEN_URL,
-        headers=headers,
-        data=data,
-        cert=cert,
-        verify=verify
-    )
+    response = requests.post(GIGACHAT_TOKEN_URL, headers=headers, data=data, verify=True)
     response.raise_for_status()
     result = response.json()
+
     token_cache["access_token"] = result['access_token']
     token_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=result['expires_in'])
     return token_cache["access_token"]
@@ -136,4 +128,3 @@ def generate_files(data):
     ws.column_dimensions["B"].width = 60
     wb.save(excel_path)
     return word_path, excel_path
-
