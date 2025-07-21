@@ -1,5 +1,3 @@
-# agent_core.py
-
 import os
 import uuid
 import requests

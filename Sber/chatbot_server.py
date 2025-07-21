@@ -1,5 +1,3 @@
-# chatbot_server.py
-
 import logging
 from aiohttp import web
 
