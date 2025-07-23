@@ -15,7 +15,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
         all_agents_data = []
 
         for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row[4]:  # Название инициативы
+            if not row or not row[4]:  # Проверка на пустые строки
                 continue
 
             block, ssp, owner, contact, name, short_name, desc, typ = row
@@ -29,11 +29,17 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
 Тип: {typ}"""
             all_agents_data.append(full_info)
 
-        joined_data = "\n\n".join(all_agents_data)
+        if not all_agents_data:
+            joined_data = "(список инициатив пуст)"
+        else:
+            joined_data = "\n\n".join(all_agents_data)
+
     except Exception as e:
+        print(f"⚠️ Ошибка при загрузке agents.xlsm: {e}")
         joined_data = "(не удалось загрузить данные об инициативах)"
-    
-    # Отправка в GigaChat
+
+    print("\n📋 Загружено инициатив для сравнения:", len(all_agents_data))
+
     prompt = f"""
 Вот инициатива от пользователя:
 Название: {user_data['Название инициативы']}
@@ -47,22 +53,16 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
 
 Инициативы:
 {joined_data}
-"""
+    """
+
     raw_response = get_llm().invoke(prompt)
 
-    # Если это словарь — достаём текст, иначе оставляем как есть
-    if isinstance(raw_response, dict):
-        response_text = raw_response.get("message", raw_response.get("content", str(raw_response)))
-    else:
-        response_text = str(raw_response)
+    # Универсальное извлечение текста
+    response_text = str(raw_response).strip().lower()
 
-    cleaned_response = response_text.strip().lower()
+    is_unique = "уникальна" in response_text and "не уникальна" not in response_text
 
-
-    is_unique = "уникальна" in cleaned_response and "не уникальна" not in cleaned_response
-
-    return cleaned_response, is_unique
-
+    return response_text, is_unique
 
 def generate_files(data: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
