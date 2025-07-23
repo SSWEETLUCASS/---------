@@ -6,6 +6,7 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import check_idea_with_gigachat
+from gigachat_wrapper import get_llm 
 
 
 def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[str, bool]:
@@ -48,7 +49,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
 Инициативы:
 {joined_data}
 """
-    response = check_idea_with_gigachat(prompt)
+    response = get_llm().invoke(prompt)
     cleaned_response = response.replace('\\n', '\n').replace('\"', '"').strip().lower()
     is_unique = "уникальна" in cleaned_response and "не уникальна" not in cleaned_response
 

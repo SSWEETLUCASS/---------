@@ -28,11 +28,51 @@ def get_embedder() -> GigaChatEmbeddings:
     )
 
 
-def check_idea_with_gigachat(user_input: str, agents_list: str) -> str:
-    """Создаёт промпт и отправляет его в GigaChat."""
-    prompt = (
-        f"Вот список существующих AI-агентов:\n{agents_list}\n\n"
-        f"Пользователь предлагает идею: {user_input}.\n"
-        "Проверь, есть ли похожие идеи. Ответь кратко и по делу. Если идея уникальна, напиши 'Контакт лидера: ...'."
-    )
-    return get_llm().invoke(prompt)
+def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[str, bool]:
+    try:
+        wb = load_workbook("agents.xlsm", data_only=True)
+        ws = wb.active
+        all_agents_data = []
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row[4]:  # Название инициативы
+                continue
+
+            block, ssp, owner, contact, name, short_name, desc, typ = row
+            full_info = f"""Блок: {block}
+ССП: {ssp}
+Владелец: {owner}
+Контакт: {contact}
+Название инициативы: {name}
+Краткое название: {short_name}
+Описание: {desc}
+Тип: {typ}"""
+            all_agents_data.append(full_info)
+
+        joined_data = "\n\n".join(all_agents_data)
+    except Exception as e:
+        joined_data = "(не удалось загрузить данные об инициативах)"
+    
+    # Отправка в GigaChat
+    prompt = f"""
+Вот инициатива от пользователя:
+Название: {user_data['Название инициативы']}
+Краткое название: {user_data['Краткое название']}
+Описание: {user_data['Описание инициативы']}
+Тип: {user_data['Тип инициативы']}
+
+Сравни её с известными инициативами ниже и ответь:
+- Если идея похожа на существующие — напиши "НЕ уникальна".
+- Если идея действительно новая — напиши "Уникальна".
+
+Инициативы:
+{joined_data}
+"""
+    from gigachat_wrapper import get_llm
+    response = get_llm().invoke(prompt)
+
+    cleaned_response = response.replace('\\n', '\n').replace('\"', '"').strip().lower()
+    is_unique = "уникальна" in cleaned_response and "не уникальна" not in cleaned_response
+
+    return cleaned_response, is_unique
+
