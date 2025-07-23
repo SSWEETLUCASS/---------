@@ -7,35 +7,61 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import check_idea_with_gigachat
 
-def check_idea_with_gigachat_local(user_input: str) -> tuple[str, str]:
+
+def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[str, bool]:
     try:
-        wb = load_workbook("agents.xlsx")
+        wb = load_workbook("agents.xlsm", data_only=True)
         ws = wb.active
         all_agents_data = []
-        contact = None
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row[0]:
-                continue
-            name, team, contact_cell, desc = row
-            full_info = f"Название: {name}, Команда: {team}, Контакт: {contact_cell}, Описание: {desc}"
-            all_agents_data.append(full_info)
-            if name and user_input.lower() in name.lower():
-                contact = contact_cell
-        joined_data = "\n".join(all_agents_data)
-    except Exception as e:
-        joined_data = "(не удалось загрузить данные об агентах)"
-        contact = None
 
-    summary = check_idea_with_gigachat(user_input, joined_data)
-    return summary, contact
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row[4]:  # Название инициативы
+                continue
+
+            block, ssp, owner, contact, name, short_name, desc, typ = row
+            full_info = f"""Блок: {block}
+ССП: {ssp}
+Владелец: {owner}
+Контакт: {contact}
+Название инициативы: {name}
+Краткое название: {short_name}
+Описание: {desc}
+Тип: {typ}"""
+            all_agents_data.append(full_info)
+
+        joined_data = "\n\n".join(all_agents_data)
+    except Exception as e:
+        joined_data = "(не удалось загрузить данные об инициативах)"
+    
+    # Отправка в GigaChat
+    prompt = f"""
+Вот инициатива от пользователя:
+Название: {user_data['Название инициативы']}
+Краткое название: {user_data['Краткое название']}
+Описание: {user_data['Описание инициативы']}
+Тип: {user_data['Тип инициативы']}
+
+Сравни её с известными инициативами ниже и ответь:
+- Если идея похожа на существующие — напиши "НЕ уникальна".
+- Если идея действительно новая — напиши "Уникальна".
+
+Инициативы:
+{joined_data}
+"""
+    response = check_idea_with_gigachat(prompt)
+    cleaned_response = response.replace('\\n', '\n').replace('\"', '"').strip().lower()
+    is_unique = "уникальна" in cleaned_response and "не уникальна" not in cleaned_response
+
+    return cleaned_response, is_unique
+
 
 def generate_files(data: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    word_path = f"agent_{timestamp}.docx"
-    excel_path = f"agent_{timestamp}.xlsx"
+    word_path = f"initiative_{timestamp}.docx"
+    excel_path = f"initiative_{timestamp}.xlsx"
 
     doc = Document()
-    title = doc.add_heading("AI-агент — шаблон", 0)
+    title = doc.add_heading("Инициатива — шаблон", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     for key, value in data.items():
@@ -51,7 +77,7 @@ def generate_files(data: dict):
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Агент"
+    ws.title = "Инициатива"
 
     bold_font = Font(bold=True)
     thin_border = Border(
@@ -78,27 +104,34 @@ def generate_files(data: dict):
 
     return word_path, excel_path
 
+
 if __name__ == "__main__":
     while True:
-        idea = input("Введите идею агента (или 'выход'): ").strip()
-        if idea.lower() in ("выход", "exit", "quit"):
+        print("\nВведите данные инициативы (или 'выход'):")
+        title = input("Название инициативы: ").strip()
+        if title.lower() in ("выход", "exit", "quit"):
             break
 
-        print("Проверка идеи через GigaChat...")
-        result, contact = check_idea_with_gigachat_local(idea)
+        short = input("Краткое название: ").strip()
+        desc = input("Описание инициативы: ").strip()
+        type_ = input("Тип инициативы: ").strip()
+
+        user_data = {
+            "Название инициативы": title,
+            "Краткое название": short,
+            "Описание инициативы": desc,
+            "Тип инициативы": type_,
+        }
+
+        print("\n🔍 Проверка уникальности через GigaChat...")
+        result, is_unique = check_idea_with_gigachat_local(title, user_data)
 
         print("\n🧠 Ответ GigaChat:")
         print(result)
 
-        if contact:
-            print(f"\n📞 Контакт найден: {contact}")
-
-        create_files = input("\nСохранить идею в шаблон (Word/Excel)? (y/n): ").lower()
-        if create_files == 'y':
-            data = {
-                "Название": idea,
-                "Описание": result,
-                "Контакт лидера": contact or "не найден",
-            }
-            word_path, excel_path = generate_files(data)
-            print(f"\n✅ Файлы сохранены:\n - {word_path}\n - {excel_path}")
+        if is_unique:
+            print("\n✅ Идея уникальна! Генерируем шаблоны...")
+            word_path, excel_path = generate_files(user_data)
+            print(f"\n📄 Файлы созданы:\n - {word_path}\n - {excel_path}")
+        else:
+            print("\n⚠️ Идея не является уникальной. Шаблоны не созданы.")
