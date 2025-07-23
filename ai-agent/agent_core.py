@@ -5,7 +5,9 @@ from openpyxl.styles import Font, Border, Side, Alignment
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from gigachat_wrapper import get_llm 
+from gigachat_wrapper import get_llm
+import re
+
 
 
 def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[str, bool]:
@@ -20,13 +22,13 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
 
             block, ssp, owner, contact, name, short_name, desc, typ = row
             full_info = f"""Блок: {block}
-ССП: {ssp}
-Владелец: {owner}
-Контакт: {contact}
-Название инициативы: {name}
-Краткое название: {short_name}
-Описание: {desc}
-Тип: {typ}"""
+            ССП: {ssp}
+            Владелец: {owner}
+            Контакт: {contact}
+            Название инициативы: {name}
+            Краткое название: {short_name}
+            Описание: {desc}
+            Тип: {typ}"""
             all_agents_data.append(full_info)
 
         if not all_agents_data:
@@ -136,7 +138,13 @@ if __name__ == "__main__":
         result, is_unique = check_idea_with_gigachat_local(title, user_data)
 
         print("\n🧠 Ответ GigaChat:")
-        print(result)
+
+        # Попытка вытащить содержимое content='...'
+        match = re.search(r"content\s*=\s*['\"](.+?)['\"]", result)
+        if match:
+            print(match.group(1))
+        else:
+            print(result)  # fallback - просто выводим строку
 
         if is_unique:
             print("\n✅ Идея уникальна! Генерируем шаблоны...")
