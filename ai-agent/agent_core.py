@@ -5,7 +5,6 @@ from openpyxl.styles import Font, Border, Side, Alignment
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from gigachat_wrapper import check_idea_with_gigachat
 from gigachat_wrapper import get_llm 
 
 
@@ -49,8 +48,17 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
 Инициативы:
 {joined_data}
 """
-    response = get_llm().invoke(prompt)
-    cleaned_response = response.replace('\\n', '\n').replace('\"', '"').strip().lower()
+    raw_response = get_llm().invoke(prompt)
+
+    # Если это словарь — достаём текст, иначе оставляем как есть
+    if isinstance(raw_response, dict):
+        response_text = raw_response.get("message", raw_response.get("content", str(raw_response)))
+    else:
+        response_text = str(raw_response)
+
+    cleaned_response = response_text.strip().lower()
+
+
     is_unique = "уникальна" in cleaned_response and "не уникальна" not in cleaned_response
 
     return cleaned_response, is_unique
