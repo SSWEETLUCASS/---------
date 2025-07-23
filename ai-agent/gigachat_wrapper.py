@@ -28,12 +28,11 @@ def get_embedder() -> GigaChatEmbeddings:
     )
 
 
-def check_idea_with_gigachat(idea: str) -> str:
-    llm = get_llm()
+def check_idea_with_gigachat(user_input: str, agents_list: str) -> str:
+    """Создаёт промпт и отправляет его в GigaChat."""
     prompt = (
-        f"Оцени идею: '{idea}'. "
-        "Скажи, насколько она интересная, уникальная, полезная. "
-        "Выдай краткий анализ и предложи, как улучшить."
+        f"Вот список существующих AI-агентов:\n{agents_list}\n\n"
+        f"Пользователь предлагает идею: {user_input}.\n"
+        "Проверь, есть ли похожие идеи. Ответь кратко и по делу. Если идея уникальна, напиши 'Контакт лидера: ...'."
     )
-    response = llm.invoke(prompt)
-    return response
+    return get_llm().invoke(prompt)
