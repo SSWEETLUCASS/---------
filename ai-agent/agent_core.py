@@ -59,7 +59,6 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict) -> tuple[st
 
     raw_response = get_llm().invoke(prompt)
 
-    # Универсальное извлечение текста
     response_text = str(raw_response).strip().lower()
 
     is_unique = "уникальна" in response_text and "не уникальна" not in response_text

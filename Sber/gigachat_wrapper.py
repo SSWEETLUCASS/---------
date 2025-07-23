@@ -1,5 +1,3 @@
-# gigachat_wrapper.py
-
 from langchain_gigachat import GigaChat, GigaChatEmbeddings
 from secret_data import token
 
