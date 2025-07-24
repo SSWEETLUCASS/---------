@@ -2,18 +2,23 @@ from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.handle_updates import AbstractHandler
 from dialog_bot_sdk.entities.peers import PeerType
 from dialog_bot_sdk.utils import AsyncTask
+from dialog_bot_sdk.models import InteractiveMedia, InteractiveButton
+
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, Border, Side, Alignment
+
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from dotenv import load_dotenv
+
 import logging
 import os
 import re
 import requests
 from datetime import datetime
 from ai_agent import check_idea_with_gigachat_local,generate_files
+
 
 load_dotenv()
 
@@ -36,6 +41,20 @@ class BotHandler(AbstractHandler):
         user_id = sender.uid
         msg = message_text.strip()
 
+        self.bot.messaging.send_message(
+    peer,
+    "👋 Привет, @lucas_no_way! Я помогу тебе с идеями для AI-агентов. Выбери, что мы будем делать:",
+    [InteractiveMedia(
+        actions=[
+            InteractiveButton("У меня есть идея!💌", "У меня есть идея!💌"),
+            InteractiveButton("АИ-агенты?📍", "АИ-агенты?📍"),
+            InteractiveButton("Кто поможет?💬", "Кто поможет?💬"),
+            InteractiveButton("Поддержка📝", "Поддержка📝"),
+        ]
+    )]
+)
+
+
         if msg == "У меня есть идея!💌":
             user_states[user_id] = {
                 "mode": "choose",
@@ -43,7 +62,16 @@ class BotHandler(AbstractHandler):
                 "data": {},
                 "giga_mode": False
             }
-            self.bot.messaging.send_message(peer, "📝 Как хотите описать идею?\n\n- шаблон\n- свободно")
+            self.bot.messaging.send_message(
+                peer,
+                "📝 Как хотите описать идею?",
+                [InteractiveMedia(
+                    actions=[
+                        InteractiveButton("Давай шаблон!"),
+                        InteractiveButton("Я могу и сам написать"),
+                    ]
+                )]
+            )
             return
 
         # этап выбора режима
@@ -125,7 +153,16 @@ class BotHandler(AbstractHandler):
 
 
         if msg == "АИ-агенты?📍":
-            self.bot.messaging.send_message(peer, "📋 Что хотите сделать? Напишите: Все агенты или Искать по названию")
+            self.bot.messaging.send_message(
+                peer,
+                "📋 Что хотите сделать?",
+                [InteractiveMedia(
+                    actions=[
+                        InteractiveButton("Все агенты", "все агенты"),
+                        InteractiveButton("Искать по названию", "искать по названию"),
+                    ]
+                )]
+            )
             return
 
         if msg.lower() == "все агенты":
@@ -166,7 +203,7 @@ class BotHandler(AbstractHandler):
             return
 
         if msg == "Поддержка📝":
-            self.bot.messaging.send_message(peer, "✉️ Напиши нам t")
+            self.bot.messaging.send_message(peer, "✉️ Напиши нам")
             return
 
         if user_id in user_states:
