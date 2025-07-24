@@ -175,7 +175,11 @@ if __name__ == "__main__":
             result, is_unique, parsed_data = check_idea_with_gigachat_local(title, user_data, is_free_form=True)
 
         print("\n🧠 Ответ GigaChat:")
-        print(result)
+        match = re.search(r"content\s*=\s*['\"](.+?)['\"]", result)
+        if match:
+            print(match.group(1))
+        else:
+            print(result)
 
         if is_unique:
             print("\n✅ Идея уникальна!")

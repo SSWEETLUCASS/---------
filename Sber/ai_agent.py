@@ -6,69 +6,122 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
+import re
 
-def check_idea_with_gigachat(user_input: str, user_data: dict) -> tuple[str, bool]:
+
+def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict]:
     try:
-        wb = load_workbook("agents.xlsm", data_only=True)
+        wb = load_workbook("agents.xlsx", data_only=True)
         ws = wb.active
         all_agents_data = []
 
         for row in ws.iter_rows(min_row=2, values_only=True):
             if not row or not row[4]:
                 continue
+
             block, ssp, owner, contact, name, short_name, desc, typ = row
             full_info = f"""Блок: {block}
-            ССП: {ssp}
-            Владелец: {owner}
-            Контакт: {contact}
-            Название инициативы: {name}
-            Краткое название: {short_name}
-            Описание: {desc}
-            Тип: {typ}"""
+ССП: {ssp}
+Владелец: {owner}
+Контакт: {contact}
+Название инициативы: {name}
+Краткое название: {short_name}
+Описание: {desc}
+Тип: {typ}"""
             all_agents_data.append(full_info)
 
         joined_data = "\n\n".join(all_agents_data) if all_agents_data else "(список инициатив пуст)"
     except Exception as e:
-        print(f"⚠️ Ошибка при загрузке agents.xlsm: {e}")
+        print(f"⚠️ Ошибка при загрузке agents.xlsx: {e}")
         joined_data = "(не удалось загрузить данные об инициативах)"
 
-    prompt = f"""
-    Вот инициатива от пользователя:
-    Название: {user_data['Название инициативы']}
-    Краткое название: {user_data['Краткое название']}
-    Описание: {user_data['Описание инициативы']}
-    Тип: {user_data['Тип инициативы']}
+    if is_free_form:
+        prompt = f"""
+Инициативы:
+{joined_data}
 
-    Инициативы:
-    {joined_data}
+1. Проанализируй данный тебе текст и собери его по шаблону:
+"Название", 
+"Что хотим улучшить?", 
+"Какие данные поступают агенту на выход?",
+"Как процесс выглядит сейчас? as-is", 
+"Какой результат нужен от агента?",
+"Достижимый идеал(to-be)", 
+"Масштаб процесса"
 
-    Сравни инициативу пользователя с известными инициативами и ответь:
-    - Если идея похожа — напиши "НЕ уникальна + название похожей и владелец".
-    - Если новая — напиши "Уникальна" и предложи улучшения.
-    - Если текст неразборчив — напиши "Извините, не понимаю".
-    """
+Если пользователь что-то не написал, скажи об этом прямо.
+
+Текст пользователя:
+\"\"\"{user_data['Описание в свободной форме']}\"\"\"
+
+2. Сравни инициативу пользователя с известными инициативами:
+- Если идея похожа — напиши "НЕ уникальна + название и владелец".
+- Если идея новая — напиши "Уникальна" и предложи улучшения.
+- Если текст непонятный — напиши "Извините, но я вас не понимаю".
+"""
+    else:
+        prompt = f"""
+Вот инициатива от пользователя:
+Название: {user_data['Название инициативы']}
+Что хотим улучшить?: {user_data['Что хотим улучшить?']}
+Какие данные поступают агенту на выход?: {user_data['Какие данные поступают агенту на выход?']}
+Как процесс выглядит сейчас? as-is: {user_data['Как процесс выглядит сейчас? as-is']}
+Какой результат нужен от агента?: {user_data['Какой результат нужен от агента?']}
+Достижимый идеал(to-be): {user_data['Достижимый идеал(to-be)']}
+Масштаб процесса: {user_data['Масштаб процесса']}
+
+Инициативы:
+{joined_data}
+
+Сравни инициативу с существующими.
+"""
 
     raw_response = get_llm().invoke(prompt)
     response_text = str(raw_response).strip()
+
     is_unique = "уникальна" in response_text.lower() and "не уникальна" not in response_text.lower()
-    return response_text, is_unique
+
+    parsed_data = {}
+    if is_free_form:
+        fields = [
+            "Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
+            "Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
+            "Достижимый идеал(to-be)", "Масштаб процесса"
+        ]
+        for field in fields:
+            match = re.search(rf"{field}[:\-–]\s*(.+)", response_text, re.IGNORECASE)
+            if match:
+                parsed_data[field] = match.group(1).strip()
+
+    return response_text, is_unique, parsed_data
+
 
 def generate_files(data: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     word_path = f"initiative_{timestamp}.docx"
     excel_path = f"initiative_{timestamp}.xlsx"
 
+    # DOCX
     doc = Document()
-    doc.add_heading("Инициатива — шаблон", 0).alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title = doc.add_heading("Инициатива — шаблон", 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
     for key, value in data.items():
         p = doc.add_paragraph()
-        p.add_run(f"{key}:\n").bold = True
-        p.add_run(f"{value}\n").font.size = Pt(12)
+        run = p.add_run(f"{key}:\n")
+        run.bold = True
+        run.font.size = Pt(14)
+        run2 = p.add_run(f"{value}\n")
+        run2.font.size = Pt(12)
+        p.space_after = Pt(12)
+
     doc.save(word_path)
 
+    # XLSX
     wb = Workbook()
     ws = wb.active
     ws.title = "Инициатива"
+
     bold_font = Font(bold=True)
     thin_border = Border(
         left=Side(style="thin"), right=Side(style="thin"),
