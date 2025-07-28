@@ -8,6 +8,19 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
 import re
 
+from difflib import SequenceMatcher
+
+def retrieve_similar_ideas(user_input: str, agents_data: list[str], threshold: float = 0.3) -> list[str]:
+    """
+    Простейшая реализация RAG: ищем инициативы, похожие по тексту на user_input
+    """
+    similar = []
+    for idea in agents_data:
+        ratio = SequenceMatcher(None, user_input.lower(), idea.lower()).ratio()
+        if ratio > threshold:
+            similar.append(idea)
+    return similar
+
 def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict]:
     try:
         wb = load_workbook("agents.xlsx", data_only=True)
@@ -34,29 +47,29 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         print(f"⚠️ Ошибка при загрузке agents.xlsx: {e}")
         joined_data = "(не удалось загрузить данные об инициативах)"
 
+    # 🎯 RAG — выбираем только похожие инициативы
+    rag_context = retrieve_similar_ideas(user_input, all_agents_data)
+    rag_context_text = "\n\n".join(rag_context) if rag_context else "Ничего похожего не найдено."
+
     if is_free_form:
         prompt = f"""
-Инициативы:
-{joined_data}
+Вот список похожих инициатив (RAG):
+{rag_context_text}
 
-1. Проанализируй данный тебе текст и собери его по шаблону:
-"Название", 
-"Что хотим улучшить?", 
-"Какие данные поступают агенту на выход?",
-"Как процесс выглядит сейчас? as-is", 
-"Какой результат нужен от агента?",
-"Достижимый идеал(to-be)", 
-"Масштаб процесса"
+1. Проанализируй текст и заполни шаблон:
+"Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
+"Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
+"Достижимый идеал(to-be)", "Масштаб процесса"
 
-Если пользователь что-то не написал, скажи об этом прямо.
+Если что-то не указано — скажи об этом.
 
 Текст пользователя:
 \"\"\"{user_data['Описание в свободной форме']}`\"\"\"
 
-2. Сравни инициативу пользователя с известными инициативами:
-- Если идея похожа — напиши "НЕ уникальна + название и владелец".
-- Если идея новая — напиши "Уникальна" и предложи улучшения.
-- Если текст непонятный — напиши "Извините, но я вас не понимаю".
+2. Сравни инициативу с найденными:
+- Если идея похожа — "НЕ уникальна + название и владелец"
+- Если новая — "Уникальна", предложи улучшения
+- Если непонятно — "Извините, но я вас не понимаю"
 """
     else:
         prompt = f"""
@@ -69,10 +82,10 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
 Достижимый идеал(to-be): {user_data['Достижимый идеал(to-be)']}
 Масштаб процесса: {user_data['Масштаб процесса']}
 
-Инициативы:
-{joined_data}
+Похожие инициативы (RAG):
+{rag_context_text}
 
-Сравни инициативу с существующими.
+Сравни инициативу с ними, и прими решение: уникальна или нет?
 """
 
     raw_response = get_llm().invoke(prompt)
@@ -93,55 +106,6 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
                 parsed_data[field] = match.group(1).strip()
 
     return response_text, is_unique, parsed_data
-
-def generate_files(data: dict):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    word_path = f"initiative_{timestamp}.docx"
-    excel_path = f"initiative_{timestamp}.xlsx"
-
-    doc = Document()
-    title = doc.add_heading("Инициатива — шаблон", 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    for key, value in data.items():
-        p = doc.add_paragraph()
-        run = p.add_run(f"{key}:\n")
-        run.bold = True
-        run.font.size = Pt(14)
-        run2 = p.add_run(f"{value}\n")
-        run2.font.size = Pt(12)
-        p.space_after = Pt(12)
-
-    doc.save(word_path)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Инициатива"
-
-    bold_font = Font(bold=True)
-    thin_border = Border(
-        left=Side(style="thin"), right=Side(style="thin"),
-        top=Side(style="thin"), bottom=Side(style="thin")
-    )
-    alignment = Alignment(wrap_text=True, vertical="top")
-
-    ws.append(["Поле", "Значение"])
-    for cell in ws[1]:
-        cell.font = bold_font
-        cell.border = thin_border
-        cell.alignment = alignment
-
-    for key, value in data.items():
-        ws.append([key, value])
-        for cell in ws[ws.max_row]:
-            cell.border = thin_border
-            cell.alignment = alignment
-
-    ws.column_dimensions["A"].width = 30
-    ws.column_dimensions["B"].width = 60
-    wb.save(excel_path)
-
-    return word_path, excel_path
 
 
 if __name__ == "__main__":
