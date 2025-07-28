@@ -2,7 +2,7 @@ import os
 import logging
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
-from dialog_bot_sdk.handle_updates import AbstractHandler
+from dialog_bot_sdk.updates.update_handler import UpdateHandler
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 from dialog_bot_sdk.models import InteractiveMedia, InteractiveButton
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
@@ -27,8 +27,9 @@ TEMPLATE_FIELDS = [
 user_states = {}
 agent_query_state = {}
 
-class BotHandler(AbstractHandler):
+class BotHandler(UpdateHandler):
     def __init__(self, bot):
+        super().__init__()
         self.bot = bot
 
     def on_message(self, peer, sender, message_text):
