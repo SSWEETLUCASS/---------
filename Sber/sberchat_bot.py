@@ -147,6 +147,7 @@ def agent_handler(update: UpdateMessage) -> None:
     else:
         bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
 
+
 def help_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
 📝 Поддержка:
