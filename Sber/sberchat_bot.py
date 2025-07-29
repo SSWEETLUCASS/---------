@@ -15,6 +15,8 @@ os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = '/home/sigma.sbrf.ru@22754707/�
 
 BOT_TOKEN = os.getenv("DIALOG_BOT_TOKEN")
 
+logging.basicConfig(level=logging.INFO)
+
 TEMPLATE_FIELDS = [
     "Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
     "Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
@@ -27,6 +29,12 @@ def text_handler(message: UpdateMessage) -> None:
     user_id = message.sender.uid
     msg = message.message.text_message.text.strip()
     peer = message.peer
+
+    logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id}")
+
+    if msg.lower() in ["/start", "./start", "start"]:
+        start_handler(message)
+        return
 
     state = user_states.get(user_id, {})
 
@@ -91,6 +99,7 @@ def text_handler(message: UpdateMessage) -> None:
         bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
         return
 
+    # Приветствие по умолчанию при первом сообщении или непонятной команде
     bot.messaging.send_message(
         peer,
         "👋 Привет, @lucas_no_way! \n"
