@@ -1,9 +1,11 @@
 import os
+import tempfile
 import logging
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
-from dialog_bot_sdk.entities.messaging import UpdateMessage
-from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
+from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType, UpdateMessageContentChanged
+from dialog_bot_sdk.entities.sequence_and_updates import CustomUpdateHandler, CustomUpdateType
+from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
 from dialog_bot_sdk.interactive_media import InteractiveMedia, InteractiveMediaButton
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
@@ -30,8 +32,6 @@ def text_handler(update: UpdateMessage) -> None:
     message = update.message
     msg = message.text_message.text.strip()
     peer = update.peer
-
-    # Здесь нет sender_uid, идентифицируем пользователя по peer.id
     user_id = peer.id
 
     state = user_states.get(user_id, {})
@@ -54,6 +54,7 @@ def text_handler(update: UpdateMessage) -> None:
         group_handler(update)
         return
 
+    # Обработка состояний пользователя
     if state.get("mode") == "choose":
         if msg == "Давай шаблон!":
             user_states[user_id] = {
@@ -157,6 +158,19 @@ def help_handler(update: UpdateMessage) -> None:
 def group_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, "Давай поищем, кто это!")
 
+# Обработчик входящих файлов для скачивания
+def update_message_content_handler(update: UpdateMessage or UpdateMessageContentChanged) -> None:
+    # Проверяем, что пришло сообщение с файлом
+    if update.message.type == MessageContentType.DOCUMENT_MESSAGE:
+        document = update.message.document_message
+        # Проверяем, что можно скачать файл (file_id и access_hash не равны 0)
+        if document.file_id != 0 and document.access_hash != 0:
+            # Можно сохранять файл в папку с ботом или временную папку
+            save_path = os.path.join(os.getcwd(), document.name)
+            # Скачиваем файл синхронно
+            bot.internal.downloading.download_file_sync(save_path, document)
+            bot.messaging.send_message(update.peer, f"Файл '{document.name}' успешно скачан на сервер!")
+
 def main():
     global bot
     bot = DialogBot.create_bot({
@@ -174,6 +188,12 @@ def main():
     ])
 
     bot.messaging.message_handler([MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)])
+
+    # Регистрируем кастомный обработчик для входящих файлов
+    bot.updates.custom_update_handler([
+        CustomUpdateHandler(update_message_content_handler, CustomUpdateType.UpdateFilePassed)
+    ])
+
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 
 if __name__ == "__main__":
