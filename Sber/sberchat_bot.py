@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
-from dialog_bot_sdk.entities.peers import InteractiveMedia, InteractiveMediaGroup, InteractiveMediaButton
+from dialog_bot_sdk.interactive_media import InteractiveMedia, InteractiveMediaGroup, InteractiveMediaButton
 from dialog_bot_sdk.entities.users import User
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
