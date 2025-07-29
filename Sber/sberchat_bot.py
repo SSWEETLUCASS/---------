@@ -29,7 +29,7 @@ user_states = {}
 
 def text_handler(update: UpdateMessage) -> None:
     message = update.message
-    user_id = update.message.sender_uid
+    user_id = message.sender_uid
     msg = message.text_message.text.strip()
     peer = update.peer
 
