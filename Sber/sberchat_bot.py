@@ -3,10 +3,8 @@ import logging
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
-from dialog_bot_sdk.entities.media_and_buttons import InteractiveMedia, InteractiveButton
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
 
-from openpyxl import load_workbook
 from ai_agent import check_idea_with_gigachat_local, generate_files
 
 load_dotenv()
@@ -24,30 +22,73 @@ TEMPLATE_FIELDS = [
 ]
 
 user_states = {}
-agent_query_state = {}
 
 def text_handler(message: UpdateMessage) -> None:
     user_id = message.sender.uid
     msg = message.message.text_message.text.strip()
     peer = message.peer
 
+    state = user_states.get(user_id, {})
+
+    if state.get("mode") == "freeform":
+        user_data = {"Описание в свободной форме": msg}
+        bot.messaging.send_message(peer, "🔍 Отправляю идею в GigaChat...")
+        response, is_unique, parsed_data = check_idea_with_gigachat_local(msg, user_data, is_free_form=True)
+        bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{response}")
+
+        if is_unique and parsed_data:
+            word_path, excel_path = generate_files(parsed_data)
+            bot.messaging.send_file(peer, word_path)
+            bot.messaging.send_file(peer, excel_path)
+
+        user_states.pop(user_id)
+        return
+
+    elif state.get("mode") == "template":
+        step = state.get("step", 0)
+        state.setdefault("data", {})
+        field = TEMPLATE_FIELDS[step]
+        state["data"][field] = msg
+        step += 1
+
+        if step < len(TEMPLATE_FIELDS):
+            user_states[user_id]["step"] = step
+            bot.messaging.send_message(peer, f"{step + 1}️⃣ {TEMPLATE_FIELDS[step]}:")
+        else:
+            bot.messaging.send_message(peer, "✅ Проверяю инициативу через GigaChat...")
+            result, is_unique, _ = check_idea_with_gigachat_local("", state["data"], is_free_form=False)
+            bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{result}")
+            if is_unique:
+                word_path, excel_path = generate_files(state["data"])
+                bot.messaging.send_file(peer, word_path)
+                bot.messaging.send_file(peer, excel_path)
+            user_states.pop(user_id)
+        return
+
     if msg == "У меня есть идея!💌":
         user_states[user_id] = {
             "mode": "choose",
             "step": None,
             "data": {},
-            "giga_mode": False
         }
         bot.messaging.send_message(
             peer,
-            "📝 Как хотите описать идею?",
-            [InteractiveMedia(
-                actions=[
-                    InteractiveButton("Давай шаблон!"),
-                    InteractiveButton("Я могу и сам написать"),
-                ]
-            )]
+            "📝 Как хотите описать идею?\nНапишите 'Давай шаблон!' или 'Я могу и сам написать'"
         )
+        return
+
+    if msg == "Давай шаблон!":
+        user_states[user_id] = {
+            "mode": "template",
+            "step": 0,
+            "data": {}
+        }
+        bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
+        return
+
+    if msg == "Я могу и сам написать":
+        user_states[user_id] = {"mode": "freeform"}
+        bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
         return
 
     bot.messaging.send_message(
@@ -63,19 +104,11 @@ def text_handler(message: UpdateMessage) -> None:
         "   Агентов очень много и не всегда можно найти, кто их разрабатывает. Давай подскажем, кто эти люди!\n\n"
         "4. Поддержка📝\n"
         "   Остались вопросы или предложения по работе чат-бота? Пиши нам!\n\n"
-        "Скорее выбирай, что мы будем делать👇",
-        [InteractiveMedia(
-            actions=[
-                InteractiveButton("У меня есть идея!💌", "У меня есть идея!💌"),
-                InteractiveButton("АИ-агенты?📍", "АИ-агенты?📍"),
-                InteractiveButton("Кто поможет?💬", "Кто поможет?💬"),
-                InteractiveButton("Поддержка📝", "Поддержка📝"),
-            ]
-        )]
+        "Скорее выбирай, что мы будем делать, просто напиши текстом!"
     )
 
 def start_handler(message: UpdateMessage) -> None:
-    bot.messaging.send_message(message.peer, "👋 Привет! Я эхо-бот, готов помочь с идеями!")
+    bot.messaging.send_message(message.peer, "👋 Привет! Я Агентолог — бот, который помогает оценить идеи для AI-агентов!")
 
 def main():
     global bot
