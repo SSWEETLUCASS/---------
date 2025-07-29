@@ -121,21 +121,35 @@ def start_handler(update: UpdateMessage) -> None:
 """)
 
 def idea_handler(update: UpdateMessage) -> None:
-    peer = update.body.peer
-    user_id = update.body.message.sender_uid
+    peer = update.peer  # Получаем peer напрямую из update
+    user_id = update.sender_uid  # Получаем sender_uid напрямую из update
+    
     user_states[user_id] = {"mode": "choose"}
+    
+    # Создаем интерактивные кнопки
+    buttons = [
+        InteractiveMediaButton(
+            value="template",
+            label="Давай шаблон!"
+        ),
+        InteractiveMediaButton(
+            value="freeform",
+            label="Я могу и сам написать"
+        )
+    ]
+    
+    # Создаем медиа-группу
+    media_group = InteractiveMediaGroup(
+        title="Выберите способ:",
+        actions=buttons
+    )
+    
+    # Отправляем сообщение с кнопками
     bot.messaging.send_message(
-    peer,
-    "📝 Как вы хотите описать свою идею?",
-    [InteractiveMedia(
-        media_type="interactive",
-        layout="buttons",
-        buttons=[
-            InteractiveMediaButton("template", "Давай шаблон!"),
-            InteractiveMediaButton("freeform", "Я могу и сам написать")
-        ]
-    )]
-)
+        peer,
+        "📝 Как вы хотите описать свою идею?",
+        interactive_media_groups=[media_group]
+    )
 
 
 def agent_handler(update: UpdateMessage) -> None:
