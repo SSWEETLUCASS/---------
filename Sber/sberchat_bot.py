@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
-from dialog_bot_sdk.entities.users import User
 from dialog_bot_sdk.interactive_media import InteractiveMedia, InteractiveMediaButton
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
@@ -31,11 +30,11 @@ def text_handler(update: UpdateMessage) -> None:
     message = update.message
     msg = message.text_message.text.strip()
     peer = update.peer
-    user_id = update.sender_uid
+    user_id = peer  # Используем peer как user_id
 
     state = user_states.get(user_id, {})
 
-    logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id}")
+    logging.info(f"📩 Получено сообщение: {msg} от пользователя (peer) {user_id}")
 
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)
@@ -49,7 +48,7 @@ def text_handler(update: UpdateMessage) -> None:
     elif msg.lower() in ["/help", "help", "помощь"]:
         help_handler(update)
         return
-    elif msg.lower() in ["/Кто поможет?", "ai_agent", "агенты", "агентолог"]:
+    elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "агентолог"]:
         group_handler(update)
         return
 
@@ -103,26 +102,28 @@ def text_handler(update: UpdateMessage) -> None:
             user_states.pop(user_id)
         return
 
+
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
 👋 Привет, @user_name!
-    Меня зовут *Агентолог*, я помогу тебе с идеями для AI-агентов.
+Меня зовут *Агентолог*, я помогу тебе с идеями для AI-агентов.
 
-    Вот что я могу сделать:
-    1. *У меня есть идея!*💡
-       Я помогу тебе узнать, твоя идея уникальна!
-    2. *АИ-агенты?*📍
-      АИ-агенты разрабатываются каждый день, здесь мы собрали самый свежий список агентов!
-    3. *Кто поможет?*💬
-       Агентов очень много и не всегда можно найти, кто их разрабатывает. Давай подскажем, кто эти люди!
-    4. *Поддержка📝*
-      Остались вопросы или предложения по работе чат-бота? Пиши нам!
-    Скорее выбирай, что мы будем делать, просто напиши текстом!
+Вот что я могу сделать:
+1. *У меня есть идея!*💡
+   Я помогу тебе узнать, твоя идея уникальна!
+2. *АИ-агенты?*📍
+   АИ-агенты разрабатываются каждый день, здесь мы собрали самый свежий список агентов!
+3. *Кто поможет?*💬
+   Агентов очень много и не всегда можно найти, кто их разрабатывает. Давай подскажем, кто эти люди!
+4. *Поддержка📝*
+   Остались вопросы или предложения по работе чат-бота? Пиши нам!
+Скорее выбирай, что мы будем делать, просто напиши текстом!
 """)
+
 
 def idea_handler(update: UpdateMessage) -> None:
     peer = update.peer
-    user_id = update.sender_uid
+    user_id = peer
     user_states[user_id] = {"mode": "choose"}
     bot.messaging.send_message(
         peer,
@@ -135,8 +136,18 @@ def idea_handler(update: UpdateMessage) -> None:
         )]
     )
 
+
 def agent_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.peer, "📍 Отправялю тебе список самых свежих агентов:")
+    peer = update.peer
+    bot.messaging.send_message(peer, "📍 Отправляю тебе список самых свежих агентов:")
+
+    # Отправка файла с агентами
+    agents_file_path = "agents.xlsx"  # путь к вашему файлу с агентами
+    if os.path.exists(agents_file_path):
+        bot.messaging.send_file(peer, agents_file_path)
+    else:
+        bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
+
 
 def help_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
@@ -146,8 +157,10 @@ def help_handler(update: UpdateMessage) -> None:
 📧 Пишите нам: sigma.sbrf.ru@22754707
 """)
 
+
 def group_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, "Давай поищем, кто это!")
+
 
 def main():
     global bot
@@ -167,6 +180,7 @@ def main():
 
     bot.messaging.message_handler([MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)])
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
+
 
 if __name__ == "__main__":
     main()
