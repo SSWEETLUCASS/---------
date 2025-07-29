@@ -26,29 +26,30 @@ TEMPLATE_FIELDS = [
 
 user_states = {}
 
-def text_handler(message: UpdateMessage) -> None:
-    user_id = message.sender.uid
-    msg = message.message.text_message.text.strip()
-    peer = message.peer
+def text_handler(update: UpdateMessage) -> None:
+    message = update.message
+    user_id = message.sender_uid
+    msg = message.text_message.text.strip()
+    peer = update.peer
 
     state = user_states.get(user_id, {})
 
     logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id}")
 
     if msg.lower() in ["/start", "./start", "start"]:
-        start_handler(message)
+        start_handler(update)
         return
     elif msg.lower() in ["/idea", "idea","идея","придумал"]:
-        idea_handler(message)
+        idea_handler(update)
         return
     elif msg.lower() in ["/ai", "ai","агент","агентолог"]:
-        agent_handler(message)
+        agent_handler(update)
         return
     elif msg.lower() in ["/help","help","помощь"]:
-        help_handler(message)
+        help_handler(update)
         return
     elif msg.lower() in ["/Кто поможет?", "ai_agent","агенты","агентолог"]:
-        group_handler(message)
+        group_handler(update)
         return
 
     # Обработка идеи в свободной форме
@@ -104,7 +105,6 @@ def text_handler(message: UpdateMessage) -> None:
         bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
         return
 
-
 def start_handler(message: UpdateMessage) -> None:
     bot.messaging.send_message(message.peer, """
 👋 Привет, @user_name!
@@ -122,16 +122,13 @@ def start_handler(message: UpdateMessage) -> None:
     Скорее выбирай, что мы будем делать, просто напиши текстом!
 """)
 
-
 def idea_handler(message: UpdateMessage) -> None:
     peer = message.peer
     bot.messaging.send_message(peer, "💬 Опиши свою идею свободно, я проверю её уникальность:")
-    user_states[message.sender.uid] = {"mode": "freeform"}
-
+    user_states[message.message.sender_uid] = {"mode": "freeform"}
 
 def agent_handler(message: UpdateMessage) -> None:
     bot.messaging.send_message(message.peer, "📍 Отправялю тебе список самых свежих агентов:")
-
 
 def help_handler(message: UpdateMessage) -> None:
     bot.messaging.send_message(message.peer, """
@@ -141,10 +138,8 @@ def help_handler(message: UpdateMessage) -> None:
 📧 Пишите нам: sigma.sbrf.ru@22754707
 """)
 
-
 def group_handler(message: UpdateMessage) -> None:
     bot.messaging.send_message(message.peer, "Давай поищем, кто это!")
-
 
 def main():
     global bot
