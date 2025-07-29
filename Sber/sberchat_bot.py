@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
+from dialog_bot_sdk.entities.messaging import InteractiveMedia, InteractiveButton
 from dialog_bot_sdk.entities.users import User
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
@@ -27,10 +28,10 @@ TEMPLATE_FIELDS = [
 user_states = {}
 
 def text_handler(update: UpdateMessage) -> None:
-    message = update.message
+    message = update.body.message
     user_id = message.sender_uid
     msg = message.text_message.text.strip()
-    peer = update.peer
+    peer = update.body.peer
 
     state = user_states.get(user_id, {})
 
@@ -52,7 +53,21 @@ def text_handler(update: UpdateMessage) -> None:
         group_handler(update)
         return
 
-    # Обработка идеи в свободной форме
+    if state.get("mode") == "choose":
+        if msg == "Давай шаблон!":
+            user_states[user_id] = {
+                "mode": "template",
+                "step": 0,
+                "data": {}
+            }
+            bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
+            return
+
+        elif msg == "Я могу и сам написать":
+            user_states[user_id] = {"mode": "freeform"}
+            bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
+            return
+
     if state.get("mode") == "freeform":
         user_data = {"Описание в свободной форме": msg}
         bot.messaging.send_message(peer, "🔍 Отправляю идею в GigaChat...")
@@ -67,7 +82,6 @@ def text_handler(update: UpdateMessage) -> None:
         user_states.pop(user_id)
         return
 
-    # Обработка идеи по шаблону
     elif state.get("mode") == "template":
         step = state.get("step", 0)
         state.setdefault("data", {})
@@ -89,24 +103,8 @@ def text_handler(update: UpdateMessage) -> None:
             user_states.pop(user_id)
         return
 
-    # Инициация шаблона
-    if msg == "Давай шаблон!":
-        user_states[user_id] = {
-            "mode": "template",
-            "step": 0,
-            "data": {}
-        }
-        bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
-        return
-
-    # Инициация свободной формы
-    if msg == "Я могу и сам написать":
-        user_states[user_id] = {"mode": "freeform"}
-        bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
-        return
-
-def start_handler(message: UpdateMessage) -> None:
-    bot.messaging.send_message(message.peer, """
+def start_handler(update: UpdateMessage) -> None:
+    bot.messaging.send_message(update.body.peer, """
 👋 Привет, @user_name!
     Меня зовут *Агентолог*, я помогу тебе с идеями для AI-агентов.
 
@@ -122,24 +120,34 @@ def start_handler(message: UpdateMessage) -> None:
     Скорее выбирай, что мы будем делать, просто напиши текстом!
 """)
 
-def idea_handler(message: UpdateMessage) -> None:
-    peer = message.peer
-    bot.messaging.send_message(peer, "💬 Опиши свою идею свободно, я проверю её уникальность:")
-    user_states[message.message.sender_uid] = {"mode": "freeform"}
+def idea_handler(update: UpdateMessage) -> None:
+    peer = update.body.peer
+    user_id = update.body.message.sender_uid
+    user_states[user_id] = {"mode": "choose"}
+    bot.messaging.send_message(
+        peer,
+        "📝 Как вы хотите описать свою идею?",
+        [InteractiveMedia(
+            actions=[
+                InteractiveButton("Давай шаблон!"),
+                InteractiveButton("Я могу и сам написать")
+            ]
+        )]
+    )
 
-def agent_handler(message: UpdateMessage) -> None:
-    bot.messaging.send_message(message.peer, "📍 Отправялю тебе список самых свежих агентов:")
+def agent_handler(update: UpdateMessage) -> None:
+    bot.messaging.send_message(update.body.peer, "📍 Отправялю тебе список самых свежих агентов:")
 
-def help_handler(message: UpdateMessage) -> None:
-    bot.messaging.send_message(message.peer, """
+def help_handler(update: UpdateMessage) -> None:
+    bot.messaging.send_message(update.body.peer, """
 📝 Поддержка:
 📬 Пишите нам: @sigma.sbrf.ru@22754707
 📞 Пишите нам: 
 📧 Пишите нам: sigma.sbrf.ru@22754707
 """)
 
-def group_handler(message: UpdateMessage) -> None:
-    bot.messaging.send_message(message.peer, "Давай поищем, кто это!")
+def group_handler(update: UpdateMessage) -> None:
+    bot.messaging.send_message(update.body.peer, "Давай поищем, кто это!")
 
 def main():
     global bot
