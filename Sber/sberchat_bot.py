@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
-from dialog_bot_sdk.interactive_media import InteractiveMedia, InteractiveMediaGroup, InteractiveMediaButton
 from dialog_bot_sdk.entities.users import User
+from dialog_bot_sdk.interactive_media import InteractiveMedia, InteractiveMediaButton
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
 
@@ -28,10 +28,10 @@ TEMPLATE_FIELDS = [
 user_states = {}
 
 def text_handler(update: UpdateMessage) -> None:
-    message = update.body.message
-    user_id = message.sender_uid
+    message = update.message
+    user_id = update.message.sender_uid
     msg = message.text_message.text.strip()
-    peer = update.body.peer
+    peer = update.peer
 
     state = user_states.get(user_id, {})
 
@@ -40,16 +40,16 @@ def text_handler(update: UpdateMessage) -> None:
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)
         return
-    elif msg.lower() in ["/idea", "idea","идея","придумал"]:
+    elif msg.lower() in ["/idea", "idea", "идея", "придумал"]:
         idea_handler(update)
         return
-    elif msg.lower() in ["/ai", "ai","агент","агентолог"]:
+    elif msg.lower() in ["/ai", "ai", "агент", "агентолог"]:
         agent_handler(update)
         return
-    elif msg.lower() in ["/help","help","помощь"]:
+    elif msg.lower() in ["/help", "help", "помощь"]:
         help_handler(update)
         return
-    elif msg.lower() in ["/Кто поможет?", "ai_agent","агенты","агентолог"]:
+    elif msg.lower() in ["/Кто поможет?", "ai_agent", "агенты", "агентолог"]:
         group_handler(update)
         return
 
@@ -104,7 +104,7 @@ def text_handler(update: UpdateMessage) -> None:
         return
 
 def start_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.body.peer, """
+    bot.messaging.send_message(update.peer, """
 👋 Привет, @user_name!
     Меня зовут *Агентолог*, я помогу тебе с идеями для AI-агентов.
 
@@ -121,42 +121,25 @@ def start_handler(update: UpdateMessage) -> None:
 """)
 
 def idea_handler(update: UpdateMessage) -> None:
-    peer = update.peer  # Получаем peer напрямую из update
-    user_id = update.sender_uid  # Получаем sender_uid напрямую из update
-    
+    peer = update.peer
+    user_id = update.message.sender_uid
     user_states[user_id] = {"mode": "choose"}
-    
-    # Создаем интерактивные кнопки
-    buttons = [
-        InteractiveMediaButton(
-            value="template",
-            label="Давай шаблон!"
-        ),
-        InteractiveMediaButton(
-            value="freeform",
-            label="Я могу и сам написать"
-        )
-    ]
-    
-    # Создаем медиа-группу
-    media_group = InteractiveMediaGroup(
-        title="Выберите способ:",
-        actions=buttons
-    )
-    
-    # Отправляем сообщение с кнопками
     bot.messaging.send_message(
         peer,
         "📝 Как вы хотите описать свою идею?",
-        interactive_media_groups=[media_group]
+        [InteractiveMedia(
+            actions=[
+                InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
+                InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
+            ]
+        )]
     )
 
-
 def agent_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.body.peer, "📍 Отправялю тебе список самых свежих агентов:")
+    bot.messaging.send_message(update.peer, "📍 Отправялю тебе список самых свежих агентов:")
 
 def help_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.body.peer, """
+    bot.messaging.send_message(update.peer, """
 📝 Поддержка:
 📬 Пишите нам: @sigma.sbrf.ru@22754707
 📞 Пишите нам: 
@@ -164,7 +147,7 @@ def help_handler(update: UpdateMessage) -> None:
 """)
 
 def group_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.body.peer, "Давай поищем, кто это!")
+    bot.messaging.send_message(update.peer, "Давай поищем, кто это!")
 
 def main():
     global bot
