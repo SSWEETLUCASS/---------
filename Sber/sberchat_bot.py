@@ -3,7 +3,7 @@ import logging
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
-from dialog_bot_sdk.models import InteractiveMedia, InteractiveButton
+from dialog_bot_sdk.entities.media_and_buttons import InteractiveMedia, InteractiveButton
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
 
 from openpyxl import load_workbook
