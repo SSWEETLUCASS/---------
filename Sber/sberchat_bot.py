@@ -29,9 +29,9 @@ user_states = {}
 
 def text_handler(update: UpdateMessage) -> None:
     message = update.message
-    user_id = message.sender_uid
     msg = message.text_message.text.strip()
     peer = update.peer
+    user_id = update.sender_uid
 
     state = user_states.get(user_id, {})
 
@@ -122,7 +122,7 @@ def start_handler(update: UpdateMessage) -> None:
 
 def idea_handler(update: UpdateMessage) -> None:
     peer = update.peer
-    user_id = update.message.sender_uid
+    user_id = update.sender_uid
     user_states[user_id] = {"mode": "choose"}
     bot.messaging.send_message(
         peer,
