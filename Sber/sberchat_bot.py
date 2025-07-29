@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
-from dialog_bot_sdk.entities.messaging import InteractiveMedia, InteractiveButton
+from dialog_bot_sdk.entities.peers import InteractiveMedia, InteractiveMediaGroup, InteractiveMediaButton
 from dialog_bot_sdk.entities.users import User
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
@@ -125,15 +125,18 @@ def idea_handler(update: UpdateMessage) -> None:
     user_id = update.body.message.sender_uid
     user_states[user_id] = {"mode": "choose"}
     bot.messaging.send_message(
-        peer,
-        "📝 Как вы хотите описать свою идею?",
-        [InteractiveMedia(
-            actions=[
-                InteractiveButton("Давай шаблон!"),
-                InteractiveButton("Я могу и сам написать")
-            ]
-        )]
-    )
+    peer,
+    "📝 Как вы хотите описать свою идею?",
+    [InteractiveMedia(
+        media_type="interactive",
+        layout="buttons",
+        buttons=[
+            InteractiveMediaButton("template", "Давай шаблон!"),
+            InteractiveMediaButton("freeform", "Я могу и сам написать")
+        ]
+    )]
+)
+
 
 def agent_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.body.peer, "📍 Отправялю тебе список самых свежих агентов:")
