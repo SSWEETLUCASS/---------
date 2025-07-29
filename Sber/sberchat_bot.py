@@ -30,11 +30,13 @@ def text_handler(update: UpdateMessage) -> None:
     message = update.message
     msg = message.text_message.text.strip()
     peer = update.peer
-    user_id = peer  # Используем peer как user_id
+
+    # Здесь нет sender_uid, идентифицируем пользователя по peer.id
+    user_id = peer.id
 
     state = user_states.get(user_id, {})
 
-    logging.info(f"📩 Получено сообщение: {msg} от пользователя (peer) {user_id}")
+    logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id}")
 
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)
@@ -75,8 +77,8 @@ def text_handler(update: UpdateMessage) -> None:
 
         if is_unique and parsed_data:
             word_path, excel_path = generate_files(parsed_data)
-            bot.messaging.send_file(peer, word_path)
-            bot.messaging.send_file(peer, excel_path)
+            bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
+            bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
 
         user_states.pop(user_id)
         return
@@ -97,15 +99,14 @@ def text_handler(update: UpdateMessage) -> None:
             bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{result}")
             if is_unique:
                 word_path, excel_path = generate_files(state["data"])
-                bot.messaging.send_file(peer, word_path)
-                bot.messaging.send_file(peer, excel_path)
+                bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
+                bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
             user_states.pop(user_id)
         return
 
-
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
-👋 Привет, @user_name!
+👋 Привет!
 Меня зовут *Агентолог*, я помогу тебе с идеями для AI-агентов.
 
 Вот что я могу сделать:
@@ -120,10 +121,9 @@ def start_handler(update: UpdateMessage) -> None:
 Скорее выбирай, что мы будем делать, просто напиши текстом!
 """)
 
-
 def idea_handler(update: UpdateMessage) -> None:
     peer = update.peer
-    user_id = peer
+    user_id = peer.id
     user_states[user_id] = {"mode": "choose"}
     bot.messaging.send_message(
         peer,
@@ -136,18 +136,15 @@ def idea_handler(update: UpdateMessage) -> None:
         )]
     )
 
-
 def agent_handler(update: UpdateMessage) -> None:
     peer = update.peer
-    bot.messaging.send_message(peer, "📍 Отправляю тебе список самых свежих агентов:")
+    agents_file_path = "agents.xlsx"  # Путь к файлу с агентами
 
-    # Отправка файла с агентами
-    agents_file_path = "agents.xlsx"  # путь к вашему файлу с агентами
     if os.path.exists(agents_file_path):
-        bot.messaging.send_file(peer, agents_file_path)
+        with open(agents_file_path, "rb") as file_obj:
+            bot.messaging.send_file(peer, file_obj, filename="agents.xlsx")
     else:
         bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
-
 
 def help_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
@@ -157,10 +154,8 @@ def help_handler(update: UpdateMessage) -> None:
 📧 Пишите нам: sigma.sbrf.ru@22754707
 """)
 
-
 def group_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, "Давай поищем, кто это!")
-
 
 def main():
     global bot
@@ -180,7 +175,6 @@ def main():
 
     bot.messaging.message_handler([MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)])
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
-
 
 if __name__ == "__main__":
     main()
