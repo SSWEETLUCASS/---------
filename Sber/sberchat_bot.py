@@ -139,13 +139,17 @@ def idea_handler(update: UpdateMessage) -> None:
 
 def agent_handler(update: UpdateMessage) -> None:
     peer = update.peer
-    agents_file_path = "agents.xlsx"  # Путь к файлу с агентами
+    agents_file_path = "agents.xlsx"
 
     if os.path.exists(agents_file_path):
-        with open(agents_file_path, "rb") as file_obj:
+        file_obj = open(agents_file_path, "rb")
+        try:
             bot.messaging.send_file(peer, file_obj, filename="agents.xlsx")
+        finally:
+            file_obj.close()
     else:
         bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
+
 
 
 def help_handler(update: UpdateMessage) -> None:
@@ -157,20 +161,21 @@ def help_handler(update: UpdateMessage) -> None:
 """)
 
 def group_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.peer, "Давай поищем, кто это!")
+    peer = update.peer
+    agents_file_path = "agents.xlsx"
 
-# Обработчик входящих файлов для скачивания
-def update_message_content_handler(update: UpdateMessage or UpdateMessageContentChanged) -> None:
-    # Проверяем, что пришло сообщение с файлом
-    if update.message.type == MessageContentType.DOCUMENT_MESSAGE:
-        document = update.message.document_message
-        # Проверяем, что можно скачать файл (file_id и access_hash не равны 0)
-        if document.file_id != 0 and document.access_hash != 0:
-            # Можно сохранять файл в папку с ботом или временную папку
-            save_path = os.path.join(os.getcwd(), document.name)
-            # Скачиваем файл синхронно
-            bot.internal.downloading.download_file_sync(save_path, document)
-            bot.messaging.send_message(update.peer, f"Файл '{document.name}' успешно скачан на сервер!")
+    if not os.path.exists(agents_file_path):
+        bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
+        return
+
+    query_text = "Найди информацию по AI-агентам на основе файла"
+    user_data = {"Файл": agents_file_path}
+
+    bot.messaging.send_message(peer, "🔍 Выполняю поиск в файле с агентами через GigaChat...")
+
+    response, is_unique, parsed_data = check_idea_with_gigachat_local(query_text, user_data, is_free_form=True)
+
+    bot.messaging.send_message(peer, f"🤖 Результат поиска:\n\n{response}")
 
 def main():
     global bot
@@ -189,11 +194,6 @@ def main():
     ])
 
     bot.messaging.message_handler([MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)])
-
-    # Регистрируем кастомный обработчик для входящих файлов
-    bot.updates.custom_update_handler([
-        CustomUpdateHandler(update_message_content_handler, CustomUpdateType.UpdateFilePassed)
-    ])
 
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 
