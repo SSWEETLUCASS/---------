@@ -1,23 +1,21 @@
 import os
-import tempfile
 import logging
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
-from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType, UpdateMessageContentChanged
-from dialog_bot_sdk.entities.sequence_and_updates import CustomUpdateHandler, CustomUpdateType
+from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
-from dialog_bot_sdk.interactive_media import InteractiveMedia, InteractiveMediaButton
+from dialog_bot_sdk.interactive_media import InteractiveMediaGroup, InteractiveMedia, InteractiveMediaButton
 
 from ai_agent import check_idea_with_gigachat_local, generate_files
 
+# Загрузка переменных окружения
 load_dotenv()
 
-# Установка переменных среды для сертификации SSL
-os.environ["REQUESTS_CA_BUNDLE"] = '/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/SberCA.pem'
-os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = '/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/russiantrustedca.pem'
+# Установка путей к сертификатам
+os.environ["REQUESTS_CA_BUNDLE"] = "/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/SberCA.pem"
+os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = "/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/russiantrustedca.pem"
 
 BOT_TOKEN = os.getenv("DIALOG_BOT_TOKEN")
-
 logging.basicConfig(level=logging.INFO)
 
 TEMPLATE_FIELDS = [
@@ -33,15 +31,14 @@ def text_handler(update: UpdateMessage) -> None:
     peer = update.peer
     user_id = peer.id
 
-    msg = message.text_message.text.strip() if message.text_message and message.text_message.text else ""
-    if message.text_message and message.text_message.payload:
-        msg = message.text_message.payload.strip()
+    # Обработка текста и payload
+    msg_text = message.text_message.text if message.text_message and message.text_message.text else ""
+    payload = message.text_message.payload if message.text_message and message.text_message.payload else ""
+    msg = payload.strip() if payload else msg_text.strip()
 
     state = user_states.get(user_id, {})
 
-    logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id} | state = {state}")
-    logging.info(f"[MSG]: {msg} | Payload: {message.text_message.payload if message.text_message else None}")
-
+    logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | payload: '{payload}' | state: {state}")
 
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)
@@ -55,11 +52,11 @@ def text_handler(update: UpdateMessage) -> None:
     elif msg.lower() in ["/help", "help", "помощь"]:
         help_handler(update)
         return
-    elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "агентолог"]:
+    elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "группа"]:
         group_handler(update)
         return
 
-    # Обработка состояний пользователя
+    # Логика по шагам
     if state.get("mode") == "choose":
         if msg == "Давай шаблон!":
             user_states[user_id] = {
@@ -69,7 +66,6 @@ def text_handler(update: UpdateMessage) -> None:
             }
             bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
             return
-
         elif msg == "Я могу и сам написать":
             user_states[user_id] = {"mode": "freeform"}
             bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
@@ -110,6 +106,7 @@ def text_handler(update: UpdateMessage) -> None:
             user_states.pop(user_id)
         return
 
+
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
 👋 Привет!
@@ -124,46 +121,35 @@ def start_handler(update: UpdateMessage) -> None:
    Агентов очень много и не всегда можно найти, кто их разрабатывает. Давай подскажем, кто эти люди!
 4. *Поддержка📝*
    Остались вопросы или предложения по работе чат-бота? Пиши нам!
-Скорее выбирай, что мы будем делать, просто напиши текстом!
 """)
 
 def idea_handler(update: UpdateMessage) -> None:
     peer = update.peer
     user_id = peer.id
     user_states[user_id] = {"mode": "choose"}
-    bot.messaging.send_message(
-        peer,
-        "📝 Как вы хотите описать свою идею?",
-        [InteractiveMedia(
-            actions=[
-                InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-                InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
-            ]
-        )]
+
+    media_group = InteractiveMediaGroup(
+        media=[
+            InteractiveMedia(
+                buttons=[
+                    InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
+                    InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
+                ]
+            )
+        ]
     )
+
+    bot.messaging.send_message(peer, "📝 Как вы хотите описать свою идею?", [media_group])
 
 def agent_handler(update: UpdateMessage) -> None:
     peer = update.peer
     agents_file_path = "agents.xlsx"
 
     if os.path.exists(agents_file_path):
-        file_obj = open(agents_file_path, "rb")
-        try:
-            bot.messaging.send_file(peer, file_obj, filename="agents.xlsx")
-        finally:
-            file_obj.close()
+        with open(agents_file_path, "rb") as f:
+            bot.messaging.send_file(peer, f, filename="agents.xlsx")
     else:
         bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
-
-
-
-def help_handler(update: UpdateMessage) -> None:
-    bot.messaging.send_message(update.peer, """
-📝 Поддержка:
-📬 Пишите нам: @sigma.sbrf.ru@22754707
-📞 Пишите нам: 
-📧 Пишите нам: sigma.sbrf.ru@22754707
-""")
 
 def group_handler(update: UpdateMessage) -> None:
     peer = update.peer
@@ -182,6 +168,13 @@ def group_handler(update: UpdateMessage) -> None:
 
     bot.messaging.send_message(peer, f"🤖 Результат поиска:\n\n{response}")
 
+def help_handler(update: UpdateMessage) -> None:
+    bot.messaging.send_message(update.peer, """
+📝 Поддержка:
+📬 @sigma.sbrf.ru@22754707
+📧 sigma.sbrf.ru@22754707
+""")
+
 def main():
     global bot
     bot = DialogBot.create_bot({
@@ -198,7 +191,9 @@ def main():
         CommandHandler(help_handler, "help", description="Помощь"),
     ])
 
-    bot.messaging.message_handler([MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)])
+    bot.messaging.message_handler([
+        MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)
+    ])
 
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 
