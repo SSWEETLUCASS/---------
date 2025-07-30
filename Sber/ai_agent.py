@@ -147,7 +147,3 @@ def main():
     print("✅ Бот успешно запущен и готов к работе.")
     while True:
         pass
-
-
-if __name__ == "__main__":
-    main()
