@@ -30,13 +30,18 @@ user_states = {}
 
 def text_handler(update: UpdateMessage) -> None:
     message = update.message
-    msg = message.text_message.text.strip()
     peer = update.peer
     user_id = peer.id
 
+    msg = message.text_message.text.strip() if message.text_message and message.text_message.text else ""
+    if message.text_message and message.text_message.payload:
+        msg = message.text_message.payload.strip()
+
     state = user_states.get(user_id, {})
 
-    logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id}")
+    logging.info(f"📩 Получено сообщение: {msg} от пользователя {user_id} | state = {state}")
+    logging.info(f"[MSG]: {msg} | Payload: {message.text_message.payload if message.text_message else None}")
+
 
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)

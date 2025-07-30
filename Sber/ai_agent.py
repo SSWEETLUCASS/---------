@@ -1,149 +1,153 @@
 import os
-import logging
-from dotenv import load_dotenv
-from dialog_bot_sdk.bot import DialogBot
-from dialog_bot_sdk.entities.messaging import UpdateMessage
-from dialog_bot_sdk.models import InteractiveMedia, InteractiveButton
-from dialog_bot_sdk.entities.messaging import MessageContentType, MessageHandler, CommandHandler
-
-from ai_agent import check_idea_with_gigachat_local, generate_files
-
-load_dotenv()
-
-# Установка переменных среды для сертификации SSL
-os.environ["REQUESTS_CA_BUNDLE"] = '/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/SberCA.pem'
-os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = '/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/russiantrustedca.pem'
-
-BOT_TOKEN = os.getenv("DIALOG_BOT_TOKEN")
-
-TEMPLATE_FIELDS = [
-    "Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
-    "Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
-    "Достижимый идеал(to-be)", "Масштаб процесса"
-]
-
-user_states = {}
+from datetime import datetime
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, Border, Side, Alignment
+from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from gigachat_wrapper import get_llm
+import re
 
 
-def text_handler(message: UpdateMessage) -> None:
-    user_id = message.sender.uid
-    msg = message.message.text_message.text.strip()
-    peer = message.peer
+def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict]:
+    try:
+        wb = load_workbook("agents.xlsx", data_only=True)
+        ws = wb.active
+        all_agents_data = []
 
-    state = user_states.get(user_id, {})
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or not row[4]:
+                continue
 
-    if state.get("mode") == "freeform":
-        user_data = {"Описание в свободной форме": msg}
-        bot.messaging.send_message(peer, "🔍 Отправляю идею в GigaChat...")
-        response, is_unique, parsed_data = check_idea_with_gigachat_local(msg, user_data, is_free_form=True)
-        bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{response}")
+            block, ssp, owner, contact, name, short_name, desc, typ = row
+            full_info = f"""Блок: {block}
+            ССП: {ssp}
+            Владелец: {owner}
+            Контакт: {contact}
+            Название инициативы: {name}
+            Краткое название: {short_name}
+            Описание: {desc}
+            Тип: {typ}"""
+            all_agents_data.append(full_info)
 
-        if is_unique and parsed_data:
-            word_path, excel_path = generate_files(parsed_data)
-            bot.messaging.send_file(peer, word_path)
-            bot.messaging.send_file(peer, excel_path)
+        joined_data = "\n\n".join(all_agents_data) if all_agents_data else "(список инициатив пуст)"
+    except Exception as e:
+        print(f"⚠️ Ошибка при загрузке agents.xlsx: {e}")
+        joined_data = "(не удалось загрузить данные об инициативах)"
 
-        user_states.pop(user_id)
-        return
+    if is_free_form:
+        prompt = f"""
+        Инициативы:
+        {joined_data}
 
-    elif state.get("mode") == "template":
-        step = state.get("step", 0)
-        state.setdefault("data", {})
-        field = TEMPLATE_FIELDS[step]
-        state["data"][field] = msg
-        step += 1
+        1. Проанализируй данный тебе текст и собери его по шаблону:
+        "Название", 
+        "Что хотим улучшить?", 
+        "Какие данные поступают агенту на выход?",
+        "Как процесс выглядит сейчас? as-is", 
+        "Какой результат нужен от агента?",
+        "Достижимый идеал(to-be)", 
+        "Масштаб процесса"
 
-        if step < len(TEMPLATE_FIELDS):
-            user_states[user_id]["step"] = step
-            bot.messaging.send_message(peer, f"{step + 1}️⃣ {TEMPLATE_FIELDS[step]}:")
-        else:
-            bot.messaging.send_message(peer, "✅ Проверяю инициативу через GigaChat...")
-            result, is_unique, _ = check_idea_with_gigachat_local("", state["data"], is_free_form=False)
-            bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{result}")
-            if is_unique:
-                word_path, excel_path = generate_files(state["data"])
-                bot.messaging.send_file(peer, word_path)
-                bot.messaging.send_file(peer, excel_path)
-            user_states.pop(user_id)
-        return
+        Если пользователь что-то не написал, скажи об этом прямо.
 
-    if msg == "У меня есть идея!💌":
-        user_states[user_id] = {
-            "mode": "choose",
-            "step": None,
-            "data": {},
-        }
-        bot.messaging.send_message(
-            peer,
-            "📝 Как хотите описать идею?",
-            [InteractiveMedia(
-                actions=[
-                    InteractiveButton("Давай шаблон!"),
-                    InteractiveButton("Я могу и сам написать"),
-                ]
-            )]
-        )
-        return
+        Текст пользователя:
+        \"\"\"{user_data['Описание в свободной форме']}\"\"\"
 
-    if msg == "Давай шаблон!":
-        user_states[user_id] = {
-            "mode": "template",
-            "step": 0,
-            "data": {}
-        }
-        bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
-        return
+        2. Сравни инициативу пользователя с известными инициативами:
+        - Если идея похожа — напиши "НЕ уникальна + название и владелец".
+        - Если идея новая — напиши "Уникальна" и предложи улучшения.
+        - Если текст непонятный — напиши "Извините, но я вас не понимаю".
+        """
+    else:
+        prompt = f"""
+        Вот инициатива от пользователя:
+        Название: {user_data['Название инициативы']}
+        Что хотим улучшить?: {user_data['Что хотим улучшить?']}
+        Какие данные поступают агенту на выход?: {user_data['Какие данные поступают агенту на выход?']}
+        Как процесс выглядит сейчас? as-is: {user_data['Как процесс выглядит сейчас? as-is']}
+        Какой результат нужен от агента?: {user_data['Какой результат нужен от агента?']}
+        Достижимый идеал(to-be): {user_data['Достижимый идеал(to-be)']}
+        Масштаб процесса: {user_data['Масштаб процесса']}
 
-    if msg == "Я могу и сам написать":
-        user_states[user_id] = {"mode": "freeform"}
-        bot.messaging.send_message(peer, "✍️ Введите вашу идею в свободной форме:")
-        return
+        Инициативы:
+        {joined_data}
 
-    bot.messaging.send_message(
-        peer,
-        "👋 Привет, @lucas_no_way! \n"
-        "Меня зовут Агентолог, я помогу тебе с идеями для AI-агентов.\n\n"
-        "Вот что я могу сделать:\n"
-        "1. У меня есть идея!💡\n"
-        "   Я помогу тебе узнать, насколько твоя идея уникальна!\n\n"
-        "2. АИ-агенты?📍\n"
-        "   АИ-агенты разрабатываются каждый день, здесь мы собрали самый свежий список агентов!\n\n"
-        "3. Кто поможет?💬\n"
-        "   Агентов очень много и не всегда можно найти, кто их разрабатывает. Давай подскажем, кто эти люди!\n\n"
-        "4. Поддержка📝\n"
-        "   Остались вопросы или предложения по работе чат-бота? Пиши нам!\n\n"
-        "Скорее выбирай, что мы будем делать👇",
-        [InteractiveMedia(
-            actions=[
-                InteractiveButton("У меня есть идея!💌", "У меня есть идея!💌"),
-                InteractiveButton("АИ-агенты?📍", "АИ-агенты?📍"),
-                InteractiveButton("Кто поможет?💬", "Кто поможет?💬"),
-                InteractiveButton("Поддержка📝", "Поддержка📝"),
-            ]
-        )]
+        1. Сравни инициативу с существующими.
+
+        2. Сравни инициативу пользователя с известными инициативами:
+        - Если идея похожа — напиши "НЕ уникальна + название и владелец".
+        - Если идея новая — напиши "Уникальна" и предложи улучшения.
+        - Если текст непонятный — напиши "Извините, но я вас не понимаю".
+        """
+
+    raw_response = get_llm().invoke(prompt)
+    response_text = str(raw_response).strip()
+
+    is_unique = "уникальна" in response_text.lower() and "не уникальна" not in response_text.lower()
+
+    parsed_data = {}
+    if is_free_form:
+        fields = [
+            "Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
+            "Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
+            "Достижимый идеал(to-be)", "Масштаб процесса"
+        ]
+        for field in fields:
+            match = re.search(rf"{field}[:\-–]\s*(.+)", response_text, re.IGNORECASE)
+            if match:
+                parsed_data[field] = match.group(1).strip()
+
+    return response_text, is_unique, parsed_data
+
+
+def generate_files(data: dict):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    word_path = f"initiative_{timestamp}.docx"
+    excel_path = f"initiative_{timestamp}.xlsx"
+
+    # DOCX
+    doc = Document()
+    title = doc.add_heading("Инициатива — шаблон", 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for key, value in data.items():
+        p = doc.add_paragraph()
+        run = p.add_run(f"{key}:\n")
+        run.bold = True
+        run.font.size = Pt(14)
+        run2 = p.add_run(f"{value}\n")
+        run2.font.size = Pt(12)
+        p.space_after = Pt(12)
+
+    doc.save(word_path)
+
+    # XLSX
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Инициатива"
+
+    bold_font = Font(bold=True)
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin")
     )
+    alignment = Alignment(wrap_text=True, vertical="top")
 
+    ws.append(["Поле", "Значение"])
+    for cell in ws[1]:
+        cell.font = bold_font
+        cell.border = thin_border
+        cell.alignment = alignment
 
-def start_handler(message: UpdateMessage) -> None:
-    bot.messaging.send_message(message.peer, "👋 Привет! Я Агентолог — бот, который помогает оценить идеи для AI-агентов!")
+    for key, value in data.items():
+        ws.append([key, value])
+        for cell in ws[ws.max_row]:
+            cell.border = thin_border
+            cell.alignment = alignment
 
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 60
+    wb.save(excel_path)
 
-def main():
-    global bot
-    bot = DialogBot.create_bot({
-        "endpoint": "epbotsift.sberchat.sberbank.ru",
-        "token": BOT_TOKEN,
-        "is_secure": True,
-    })
-
-    bot.messaging.command_handler([
-        CommandHandler(start_handler, "start", description="Поздороваться"),
-    ])
-
-    bot.messaging.message_handler([
-        MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE),
-    ])
-
-    print("✅ Бот успешно запущен и готов к работе.")
-    while True:
-        pass
+    return word_path, excel_path
