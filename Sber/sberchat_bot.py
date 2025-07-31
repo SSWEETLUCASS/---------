@@ -31,13 +31,12 @@ def text_handler(update: UpdateMessage) -> None:
     peer = update.peer
     user_id = peer.id
 
-    msg_text = message.text_message.text if message.text_message and message.text_message.text else ""
-    payload = message.text_message.payload if message.text_message and message.text_message.payload else ""
-    msg = payload.strip() if payload else msg_text.strip()
+    # Только текст
+    msg = message.text_message.text.strip() if message.text_message and message.text_message.text else ""
 
     state = user_states.get(user_id, {})
 
-    logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | payload: '{payload}' | state: {state}")
+    logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | state: {state}")
 
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)
@@ -54,6 +53,9 @@ def text_handler(update: UpdateMessage) -> None:
     elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "группа"]:
         group_handler(update)
         return
+
+    # Дальнейшая логика по состояниям...
+
 
     # Обработка выбора способа ввода идеи
     if state.get("mode") == "choose":
