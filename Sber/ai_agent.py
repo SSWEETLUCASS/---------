@@ -1,3 +1,4 @@
+import re
 import os
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
@@ -6,7 +7,6 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
-import re
 
 def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict, bool]:
     try:
@@ -17,7 +17,6 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         for row in ws.iter_rows(min_row=2, values_only=True):
             if not row or not row[4]:
                 continue
-
             block, ssp, owner, contact, name, short_name, desc, typ = row
             full_info = f"""Блок: {block}
             ССП: {ssp}
@@ -104,6 +103,23 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         suggest_processing = True
 
     return response_text, is_unique, parsed_data, suggest_processing
+
+def check_general_message_with_gigachat(msg: str) -> tuple[str, bool]:
+    try:
+        prompt = f"""
+        Пользователь написал:
+        \"\"\"{msg}\"\"\"
+
+        Определи, есть ли в сообщении смысл, связанный с идеей, предложением, улучшением или инициативой.
+        Если это так, напиши фразу типа: \"Похоже, вы описали идею...\".
+        Если нет — просто дай полезный ответ по теме.
+        """
+        raw_response = get_llm().invoke(prompt)
+        response_text = str(raw_response).strip()
+        is_maybe_idea = "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower()
+        return response_text, is_maybe_idea
+    except Exception as e:
+        return f"⚠️ Ошибка при обращении к GigaChat: {e}", False
 
 def generate_files(data: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

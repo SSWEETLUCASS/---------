@@ -6,7 +6,7 @@ from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
 from dialog_bot_sdk.interactive_media import InteractiveMediaGroup, InteractiveMedia, InteractiveMediaButton
 
-from ai_agent import check_idea_with_gigachat_local, generate_files
+from ai_agent import check_general_message_with_gigachat, check_idea_with_gigachat_local, generate_files
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -25,113 +25,6 @@ TEMPLATE_FIELDS = [
 ]
 
 user_states = {}
-
-def text_handler(update: UpdateMessage) -> None:
-    message = update.message
-    peer = update.peer
-    user_id = peer.id
-
-    # Только текст
-    msg = message.text_message.text.strip() if message.text_message and message.text_message.text else ""
-
-    state = user_states.get(user_id, {})
-
-    logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | state: {state}")
-
-    if msg.lower() in ["/start", "./start", "start"]:
-        start_handler(update)
-        return
-    elif msg.lower() in ["/idea", "idea", "идея", "придумал"]:
-        idea_handler(update)
-        return
-    elif msg.lower() in ["/ai", "ai", "агент", "агентолог"]:
-        agent_handler(update)
-        return
-    elif msg.lower() in ["/help", "help", "помощь"]:
-        help_handler(update)
-        return
-    elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "группа"]:
-        group_handler(update)
-        return
-
-    # Дальнейшая логика по состояниям...
-
-
-    # Обработка выбора способа ввода идеи
-    if state.get("mode") is None:
-        # 📩 Если это общее сообщение без режима — пробуем отправить его в GigaChat
-        user_data = {"Описание в свободной форме": msg}
-        bot.messaging.send_message(peer, "🤖 Думаю над вашим сообщением...")
-        
-        response_text, is_unique, parsed_data, suggest_processing = check_idea_with_gigachat_local(
-            user_input=msg,
-            user_data=user_data,
-            is_free_form=True
-        )
-        
-        bot.messaging.send_message(peer, f"💬 GigaChat: \n\n{response_text}")
-        
-        if suggest_processing:
-            # 🤔 GigaChat считает это идеей — предлагаем её оформить
-            user_states[user_id] = {"mode": "choose"}
-            bot.messaging.send_message(peer,
-                "🧠 Похоже, у вас идея! Хотите её оформить?\n\n"
-                "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею по полям.\n"
-                "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
-                "👉 Напиши `шаблон` или `сам`, или нажми кнопку ниже:"
-            )
-            media_group = InteractiveMediaGroup(
-                media=[
-                    InteractiveMedia(
-                        buttons=[
-                            InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-                            InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
-                        ]
-                    )
-                ]
-            )
-            bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
-        else:
-            # 💡 Если не идея — просто возвращаем ответ GigaChat
-            bot.messaging.send_message(peer, "Если это была идея — напиши подробнее! 😉")
-        
-        return
-
-
-    if state.get("mode") == "freeform" and state.get("awaiting_text"):
-        user_data = {"Описание в свободной форме": msg}
-        bot.messaging.send_message(peer, "🔍 Отправляю идею в GigaChat...")
-        response, is_unique, parsed_data = check_idea_with_gigachat_local(msg, user_data, is_free_form=True)
-        bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{response}")
-
-        if is_unique and parsed_data:
-            word_path, excel_path = generate_files(parsed_data)
-            bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
-            bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
-
-        user_states.pop(user_id)
-        return
-
-    elif state.get("mode") == "template":
-        step = state.get("step", 0)
-        state.setdefault("data", {})
-        field = TEMPLATE_FIELDS[step]
-        state["data"][field] = msg
-        step += 1
-
-        if step < len(TEMPLATE_FIELDS):
-            user_states[user_id]["step"] = step
-            bot.messaging.send_message(peer, f"{step + 1}️⃣ {TEMPLATE_FIELDS[step]}:")
-        else:
-            bot.messaging.send_message(peer, "✅ Проверяю инициативу через GigaChat...")
-            result, is_unique, _ = check_idea_with_gigachat_local("", state["data"], is_free_form=False)
-            bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{result}")
-            if is_unique:
-                word_path, excel_path = generate_files(state["data"])
-                bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
-                bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
-            user_states.pop(user_id)
-        return
 
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
@@ -187,7 +80,7 @@ def group_handler(update: UpdateMessage) -> None:
     query_text = "Найди информацию по AI-агентам на основе файла"
     user_data = {"Файл": agents_file_path}
     bot.messaging.send_message(peer, "🔍 Выполняю поиск через GigaChat...")
-    response, is_unique, parsed_data = check_idea_with_gigachat_local(query_text, user_data, is_free_form=True)
+    response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(query_text, user_data, is_free_form=True)
     bot.messaging.send_message(peer, f"🤖 Результат:\n\n{response}")
 
 def help_handler(update: UpdateMessage) -> None:
@@ -196,6 +89,104 @@ def help_handler(update: UpdateMessage) -> None:
 📬 @sigma.sbrf.ru@22754707
 📧 sigma.sbrf.ru@22754707
 """)
+
+def text_handler(update: UpdateMessage) -> None:
+    message = update.message
+    peer = update.peer
+    user_id = peer.id
+
+    msg = message.text_message.text.strip() if message.text_message and message.text_message.text else ""
+    state = user_states.get(user_id, {})
+    logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | state: {state}")
+
+    if msg.lower() in ["/start", "./start", "start"]:
+        start_handler(update)
+        return
+    elif msg.lower() in ["/idea", "idea", "идея", "придумал"]:
+        idea_handler(update)
+        return
+    elif msg.lower() in ["/ai", "ai", "агент", "агентолог"]:
+        agent_handler(update)
+        return
+    elif msg.lower() in ["/help", "help", "помощь"]:
+        help_handler(update)
+        return
+    elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "группа"]:
+        group_handler(update)
+        return
+
+    if state.get("mode") == "choose":
+        msg_clean = msg.lower()
+        if msg_clean in ["шаблон", "давай шаблон!", "хочу шаблон", "по шаблону"]:
+            user_states[user_id] = {"mode": "template", "step": 0, "data": {}}
+            bot.messaging.send_message(peer, "✅ Вы выбрали: *Шаблон*\nДавайте начнём заполнение.")
+            bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
+            return
+        elif msg_clean in ["сам", "свободно", "хочу сам", "я могу и сам написать"]:
+            user_states[user_id] = {"mode": "freeform", "awaiting_text": True}
+            bot.messaging.send_message(peer, "✅ Вы выбрали: *Свободная форма*\nПожалуйста, напишите свою идею:")
+            return
+        else:
+            bot.messaging.send_message(peer, "⚠️ Пожалуйста, напишите `шаблон` или `сам`.")
+            return
+
+    if state.get("mode") == "template":
+        step = state.get("step", 0)
+        field = TEMPLATE_FIELDS[step]
+        state.setdefault("data", {})
+        state["data"][field] = msg
+        step += 1
+
+        if step < len(TEMPLATE_FIELDS):
+            user_states[user_id]["step"] = step
+            bot.messaging.send_message(peer, f"{step + 1}️⃣ {TEMPLATE_FIELDS[step]}:")
+        else:
+            bot.messaging.send_message(peer, "✅ Проверяю инициативу через GigaChat...")
+            result, is_unique, _, _ = check_idea_with_gigachat_local("", state["data"], is_free_form=False)
+            bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{result}")
+            if is_unique:
+                word_path, excel_path = generate_files(state["data"])
+                bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
+                bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
+            user_states.pop(user_id)
+        return
+
+    if state.get("mode") == "freeform" and state.get("awaiting_text"):
+        user_data = {"Описание в свободной форме": msg}
+        bot.messaging.send_message(peer, "🔍 Отправляю идею в GigaChat...")
+        response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(msg, user_data, is_free_form=True)
+        bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{response}")
+
+        if is_unique and parsed_data:
+            word_path, excel_path = generate_files(parsed_data)
+            bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
+            bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
+
+        user_states.pop(user_id)
+        return
+
+    if not state:
+        response_text, is_maybe_idea = check_general_message_with_gigachat(msg)
+        bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{response_text}")
+
+        if is_maybe_idea:
+            user_states[user_id] = {"mode": "choose"}
+            bot.messaging.send_message(peer,
+                "🧠 Похоже, у вас идея! Хотите её оформить?\n\n"
+                "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею по полям.\n"
+                "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
+                "👉 Напиши `шаблон` или `сам`, или нажми кнопку ниже:")
+            media_group = InteractiveMediaGroup(
+                media=[
+                    InteractiveMedia(
+                        buttons=[
+                            InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
+                            InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
+                        ]
+                    )
+                ]
+            )
+            bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
 
 def main():
     global bot
@@ -206,11 +197,11 @@ def main():
     })
 
     bot.messaging.command_handler([
-        CommandHandler(start_handler, "start", description="Поздороваться"),
-        CommandHandler(idea_handler, "idea", description="Идея!"),
-        CommandHandler(agent_handler, "ai_agent", description="Аи-агенты!"),
-        CommandHandler(group_handler, "group", description="Группа разработки"),
-        CommandHandler(help_handler, "help", description="Помощь"),
+        CommandHandler(start_handler, "start"),
+        CommandHandler(idea_handler, "idea"),
+        CommandHandler(agent_handler, "ai_agent"),
+        CommandHandler(group_handler, "group"),
+        CommandHandler(help_handler, "help"),
     ])
 
     bot.messaging.message_handler([
