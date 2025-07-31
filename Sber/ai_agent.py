@@ -9,6 +9,18 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
 
 def clean_response_text(text: str) -> str:
+    # Удаляем обёртку content='...'
+    if text.startswith("content="):
+        text = re.sub(r"^content=['\"]?", "", text)
+        text = re.sub(r"['\"]?$", "", text)
+
+    # Преобразуем литералы \n в настоящие переносы
+    text = text.encode('utf-8').decode('unicode_escape')
+
+    # Удаляем лишние символы вроде двойных обратных слешей
+    text = text.replace("\\", "")
+
+    # Убираем лишние пробелы и обрабатываем markdown
     lines = text.strip().split("\n")
     cleaned_lines = []
 
@@ -16,11 +28,11 @@ def clean_response_text(text: str) -> str:
         line = line.strip()
         if not line:
             continue
-        # Убираем Markdown символы
-        line = re.sub(r"^[\*\-•\d\.\)]*\s*", "• ", line)  # заменим нумерацию и маркеры на буллет
-        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)  # жирный
-        line = re.sub(r"\*(.*?)\*", r"\1", line)      # курсив
-        line = re.sub(r"`(.*?)`", r"\1", line)        # inline code
+        # Убираем начальные маркеры и нумерацию
+        line = re.sub(r"^[\*\-•\d\.\)]*\s*", "• ", line)
+        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
+        line = re.sub(r"\*(.*?)\*", r"\1", line)
+        line = re.sub(r"`(.*?)`", r"\1", line)
         cleaned_lines.append(line)
 
     return "\n".join(cleaned_lines)
