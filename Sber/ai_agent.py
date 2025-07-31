@@ -8,6 +8,24 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
 
+def clean_response_text(text: str) -> str:
+    lines = text.strip().split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Убираем Markdown символы
+        line = re.sub(r"^[\*\-•\d\.\)]*\s*", "• ", line)  # заменим нумерацию и маркеры на буллет
+        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)  # жирный
+        line = re.sub(r"\*(.*?)\*", r"\1", line)      # курсив
+        line = re.sub(r"`(.*?)`", r"\1", line)        # inline code
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
+
 def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict, bool]:
     try:
         wb = load_workbook("agents.xlsx", data_only=True)
@@ -82,7 +100,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         """
 
     raw_response = get_llm().invoke(prompt)
-    response_text = str(raw_response).strip()
+    response_text = clean_response_text(str(raw_response).strip())
 
     is_unique = "уникальна" in response_text.lower() and "не уникальна" not in response_text.lower()
 
@@ -115,7 +133,7 @@ def check_general_message_with_gigachat(msg: str) -> tuple[str, bool]:
         Если нет — просто дай полезный ответ по теме.
         """
         raw_response = get_llm().invoke(prompt)
-        response_text = str(raw_response).strip()
+        response_text = clean_response_text(str(raw_response).strip())
         is_maybe_idea = "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower()
         return response_text, is_maybe_idea
     except Exception as e:
