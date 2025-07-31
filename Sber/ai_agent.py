@@ -8,8 +8,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
 import re
 
-
-def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict]:
+def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict, bool]:
     try:
         wb = load_workbook("agents.xlsx", data_only=True)
         ws = wb.active
@@ -58,6 +57,8 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         - Если идея похожа — напиши "НЕ уникальна + название и владелец".
         - Если идея новая — напиши "Уникальна" и предложи улучшения.
         - Если текст непонятный — напиши "Извините, но я вас не понимаю".
+
+        3. Если это похоже на идею, но пользователь не указал, что хочет её проверить — предложи ему это сделать.
         """
     else:
         prompt = f"""
@@ -98,15 +99,17 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
             if match:
                 parsed_data[field] = match.group(1).strip()
 
-    return response_text, is_unique, parsed_data
+    suggest_processing = False
+    if "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower():
+        suggest_processing = True
 
+    return response_text, is_unique, parsed_data, suggest_processing
 
 def generate_files(data: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     word_path = f"initiative_{timestamp}.docx"
     excel_path = f"initiative_{timestamp}.xlsx"
 
-    # DOCX
     doc = Document()
     title = doc.add_heading("Инициатива — шаблон", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -122,7 +125,6 @@ def generate_files(data: dict):
 
     doc.save(word_path)
 
-    # XLSX
     wb = Workbook()
     ws = wb.active
     ws.title = "Инициатива"
