@@ -26,6 +26,15 @@ TEMPLATE_FIELDS = [
 
 user_states = {}
 
+def format_response(text: str) -> str:
+    lines = text.strip().split("\n")
+    formatted = "\n".join([
+        f"• {line.strip().lstrip('*').rstrip('*')}"
+        if not line.strip().startswith("#") else f"\n{line.strip('#').strip()}\n"
+        for line in lines if line.strip()
+    ])
+    return formatted.strip()
+
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
 👋 Привет!
@@ -43,7 +52,7 @@ def idea_handler(update: UpdateMessage) -> None:
     user_id = peer.id
     user_states[user_id] = {"mode": "choose"}
 
-    bot.messaging.send_message(peer, 
+    bot.messaging.send_message(peer,
         "📝 *Как вы хотите описать свою идею?*\n\n"
         "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею по полям.\n"
         "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
@@ -118,20 +127,13 @@ def text_handler(update: UpdateMessage) -> None:
     if state.get("mode") == "choose":
         msg_clean = msg.lower()
         if msg_clean in ["шаблон", "давай шаблон!", "хочу шаблон", "по шаблону"]:
-            user_states[user_id] = {
-                "mode": "template",
-                "step": 0,
-                "data": {}
-            }
+            user_states[user_id] = {"mode": "template", "step": 0, "data": {}}
             bot.messaging.send_message(peer, "✅ Вы выбрали: *Шаблон*\nДавайте начнём заполнение.")
             bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
             return
         elif msg_clean in ["сам", "свободно", "хочу сам", "я могу и сам написать"]:
-            user_states[user_id] = {
-                "mode": "freeform",
-                "awaiting_text": True
-            }
-            bot.messaging.send_message(peer, "✅ Вы выбрали: *Свободная форма*\nПожалуйста, напишите свою идею или запрос:")
+            user_states[user_id] = {"mode": "freeform", "awaiting_text": True}
+            bot.messaging.send_message(peer, "✅ Вы выбрали: *Свободная форма*\nНапишите вашу идею или вопрос:")
             return
         else:
             bot.messaging.send_message(peer, "⚠️ Пожалуйста, напишите `шаблон` или `сам`.")
@@ -193,11 +195,6 @@ def text_handler(update: UpdateMessage) -> None:
             ]
         )
         bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
-
-def format_response(text: str) -> str:
-    lines = text.strip().split("\n")
-    formatted = "\n".join([f"• {line.strip()}" if not line.strip().startswith("#") else f"\n{line.strip()}" for line in lines if line.strip()])
-    return formatted
 
 def main():
     global bot
