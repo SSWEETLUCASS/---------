@@ -19,7 +19,7 @@ BOT_TOKEN = os.getenv("DIALOG_BOT_TOKEN")
 logging.basicConfig(level=logging.INFO)
 
 TEMPLATE_FIELDS = [
-    "Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
+    "Название инициативы", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
     "Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
     "Достижимый идеал(to-be)", "Масштаб процесса"
 ]
@@ -31,7 +31,6 @@ def text_handler(update: UpdateMessage) -> None:
     peer = update.peer
     user_id = peer.id
 
-    # Получение текста и payload
     msg_text = message.text_message.text if message.text_message and message.text_message.text else ""
     payload = message.text_message.payload if message.text_message and message.text_message.payload else ""
     msg = payload.strip() if payload else msg_text.strip()
@@ -40,7 +39,6 @@ def text_handler(update: UpdateMessage) -> None:
 
     logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | payload: '{payload}' | state: {state}")
 
-    # Команды
     if msg.lower() in ["/start", "./start", "start"]:
         start_handler(update)
         return
@@ -57,34 +55,32 @@ def text_handler(update: UpdateMessage) -> None:
         group_handler(update)
         return
 
-    # Режим выбора варианта
+    # Обработка выбора способа ввода идеи
     if state.get("mode") == "choose":
-        if msg in ["Давай шаблон!", "шаблон"]:
+        msg_clean = msg.lower()
+        if msg_clean in ["шаблон", "давай шаблон!", "хочу шаблон", "по шаблону"]:
             user_states[user_id] = {
                 "mode": "template",
                 "step": 0,
                 "data": {}
             }
-            bot.messaging.send_message(peer, "🧾 Отлично! Заполняем шаблон.\nВведите следующий пункт:")
+            bot.messaging.send_message(peer, "✅ Вы выбрали: *Шаблон*\nДавайте начнём заполнение.")
             bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
             return
-        elif msg in ["Я могу и сам написать", "сам", "свободно"]:
+        elif msg_clean in ["сам", "свободно", "хочу сам", "я могу и сам написать"]:
             user_states[user_id] = {
                 "mode": "freeform",
                 "awaiting_text": True
             }
-            bot.messaging.send_message(peer, "✍️ Введите свою идею в свободной форме:")
+            bot.messaging.send_message(peer, "✅ Вы выбрали: *Свободная форма*\nПожалуйста, напишите свою идею:")
             return
         else:
-            bot.messaging.send_message(peer, "⚠️ Пожалуйста, выберите один из предложенных вариантов:")
-            idea_handler(update)
+            bot.messaging.send_message(peer, "⚠️ Пожалуйста, напишите `шаблон` или `сам`.")
             return
 
-    # Обработка свободной формы
     if state.get("mode") == "freeform" and state.get("awaiting_text"):
         user_data = {"Описание в свободной форме": msg}
         bot.messaging.send_message(peer, "🔍 Отправляю идею в GigaChat...")
-
         response, is_unique, parsed_data = check_idea_with_gigachat_local(msg, user_data, is_free_form=True)
         bot.messaging.send_message(peer, f"🤖 Ответ GigaChat:\n\n{response}")
 
@@ -96,8 +92,7 @@ def text_handler(update: UpdateMessage) -> None:
         user_states.pop(user_id)
         return
 
-    # Обработка шаблона
-    if state.get("mode") == "template":
+    elif state.get("mode") == "template":
         step = state.get("step", 0)
         state.setdefault("data", {})
         field = TEMPLATE_FIELDS[step]
@@ -124,10 +119,10 @@ def start_handler(update: UpdateMessage) -> None:
 Меня зовут *Агентолог*, я помогу тебе с идеями для AI-агентов.
 
 Вот что я могу сделать:
-1. *У меня есть идея!*💡
-2. *АИ-агенты?*📍
-3. *Кто поможет?*💬
-4. *Поддержка📝*
+1. *У меня есть идея!*💡 — проверить, уникальна ли идея
+2. *АИ-агенты?*📍 — скачать список уже реализованных
+3. *Кто поможет?*💬 — найти владельцев
+4. *Поддержка📝* — задать вопрос команде
 """)
 
 def idea_handler(update: UpdateMessage) -> None:
@@ -135,7 +130,11 @@ def idea_handler(update: UpdateMessage) -> None:
     user_id = peer.id
     user_states[user_id] = {"mode": "choose"}
 
-    bot.messaging.send_message(peer, "📋 Как вы хотите описать свою идею?\n\nВыберите один из вариантов ниже:")
+    bot.messaging.send_message(peer, 
+        "📝 *Как вы хотите описать свою идею?*\n\n"
+        "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею по полям.\n"
+        "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
+        "👉 Напиши `шаблон` или `сам`, или нажми кнопку ниже:")
 
     media_group = InteractiveMediaGroup(
         media=[
@@ -147,8 +146,7 @@ def idea_handler(update: UpdateMessage) -> None:
             )
         ]
     )
-
-    bot.messaging.send_message(peer, "👇 Выберите способ:", [media_group])
+    bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
 
 def agent_handler(update: UpdateMessage) -> None:
     peer = update.peer
@@ -168,9 +166,9 @@ def group_handler(update: UpdateMessage) -> None:
 
     query_text = "Найди информацию по AI-агентам на основе файла"
     user_data = {"Файл": agents_file_path}
-    bot.messaging.send_message(peer, "🔍 Выполняю поиск в файле с агентами через GigaChat...")
+    bot.messaging.send_message(peer, "🔍 Выполняю поиск через GigaChat...")
     response, is_unique, parsed_data = check_idea_with_gigachat_local(query_text, user_data, is_free_form=True)
-    bot.messaging.send_message(peer, f"🤖 Результат поиска:\n\n{response}")
+    bot.messaging.send_message(peer, f"🤖 Результат:\n\n{response}")
 
 def help_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
