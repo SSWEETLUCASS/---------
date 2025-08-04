@@ -8,34 +8,29 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from gigachat_wrapper import get_llm
 
-def clean_response_text(text: str) -> str:
-    # Удаляем обёртку content='...'
-    if text.startswith("content="):
-        text = re.sub(r"^content=['\"]?", "", text)
-        text = re.sub(r"['\"]?$", "", text)
+def clean_response_text(response_text: str) -> str:
+    # Удаление префикса content='...'
+    content_match = re.search(r"content\s*=\s*['\"](.*?)['\"]\s*(,|\}|$)", response_text, re.DOTALL)
+    if content_match:
+        response_text = content_match.group(1)
 
-    # Преобразуем литералы \n в настоящие переносы
-    text = text.encode('utf-8').decode('unicode_escape')
+    # Удаление экранированных символов \n, \" и двойных слэшей
+    response_text = response_text.encode().decode('unicode_escape')
 
-    # Удаляем лишние символы вроде двойных обратных слешей
-    text = text.replace("\\", "")
+    # Удаление множественных пробелов
+    response_text = re.sub(r'\s{2,}', ' ', response_text)
 
-    # Убираем лишние пробелы и обрабатываем markdown
-    lines = text.strip().split("\n")
-    cleaned_lines = []
+    # Удаление Markdown заголовков, если не нужен markdown
+    response_text = re.sub(r'^#+\s*', '', response_text, flags=re.MULTILINE)
 
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Убираем начальные маркеры и нумерацию
-        line = re.sub(r"^[\*\-•\d\.\)]*\s*", "• ", line)
-        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
-        line = re.sub(r"\*(.*?)\*", r"\1", line)
-        line = re.sub(r"`(.*?)`", r"\1", line)
-        cleaned_lines.append(line)
+    # Удаление маркеров списков (*, -) с пробелом
+    response_text = re.sub(r'^[\*\-]\s+', '', response_text, flags=re.MULTILINE)
 
-    return "\n".join(cleaned_lines)
+    # Удаление лишних пустых строк
+    response_text = re.sub(r'\n{2,}', '\n\n', response_text.strip())
+
+    return response_text
+
 
 
 def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict, bool]:
@@ -68,7 +63,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         Инициативы:
         {joined_data}
 
-        1. Проанализируй данный тебе текст и собери его по шаблону:
+        1. Проанализируй текст пользователя и собери его по шаблону:
         "Название", 
         "Что хотим улучшить?", 
         "Какие данные поступают агенту на выход?",
@@ -77,7 +72,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         "Достижимый идеал(to-be)", 
         "Масштаб процесса"
 
-        Если пользователь что-то не написал, скажи об этом прямо.
+        Если что-то не указано — скажи об этом прямо.
 
         Текст пользователя:
         \"\"\"{user_data['Описание в свободной форме']}\"\"\"
@@ -104,13 +99,10 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         {joined_data}
 
         1. Сравни инициативу с существующими.
-
-        2. Сравни инициативу пользователя с известными инициативами:
+        2. Проверь уникальность: 
         - Если идея похожа — напиши "НЕ уникальна + название и владелец".
-        - Если идея новая — напиши "Уникальна" и предложи улучшения.
-        - Если текст непонятный — напиши "Извините, но я вас не понимаю".
+        - Если новая — напиши "Уникальна" и предложи улучшения.
         """
-
     raw_response = get_llm().invoke(prompt)
     response_text = clean_response_text(str(raw_response).strip())
 
@@ -128,28 +120,40 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
             if match:
                 parsed_data[field] = match.group(1).strip()
 
-    suggest_processing = False
-    if "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower():
-        suggest_processing = True
+    suggest_processing = "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower()
 
     return response_text, is_unique, parsed_data, suggest_processing
 
-def check_general_message_with_gigachat(msg: str) -> tuple[str, bool]:
+
+def check_general_message_with_gigachat_enhanced(msg: str) -> tuple[str, str]:
     try:
         prompt = f"""
         Пользователь написал:
         \"\"\"{msg}\"\"\"
 
-        Определи, есть ли в сообщении смысл, связанный с идеей, предложением, улучшением или инициативой.
-        Если это так, напиши фразу типа: \"Похоже, вы описали идею...\".
-        Если нет — просто дай полезный ответ по теме.
+        Проанализируй сообщение. Ответь двумя строками:
+        1. Краткий ответ на сообщение.
+        2. Категория действия (одно слово): идея / шаблон / аналитика / агент / не_по_теме
+
+        Примеры:
+        • "Похоже, вы описали идею. Хотите её оформить?"\nидея
+        • "Вы можете использовать шаблон для инициатив."\nшаблон
+        • "Это похоже на аналитический запрос, хотите построить отчёт?"\nаналитика
+        • "Это задание для агента. Хотите, я создам помощника?"\nагент
+        • "Извините, я помогаю только с инициативами, шаблонами и аналитикой."\nне_по_теме
         """
         raw_response = get_llm().invoke(prompt)
-        response_text = clean_response_text(str(raw_response).strip())
-        is_maybe_idea = "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower()
-        return response_text, is_maybe_idea
+        text = clean_response_text(str(raw_response).strip())
+
+        if "\n" in text:
+            reply, intent = text.split("\n", 1)
+        else:
+            reply, intent = text, "не_по_теме"
+
+        return reply.strip(), intent.strip()
     except Exception as e:
-        return f"⚠️ Ошибка при обращении к GigaChat: {e}", False
+        return f"⚠️ Ошибка при обращении к GigaChat: {e}", "ошибка"
+
 
 def generate_files(data: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
