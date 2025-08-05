@@ -4,9 +4,16 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
-from dialog_bot_sdk.interactive_media import InteractiveMediaGroup, InteractiveMedia, InteractiveMediaButton
-
 from ai_agent import check_general_message_with_gigachat, check_idea_with_gigachat_local, generate_files
+
+
+from dialog_bot_sdk.interactive_media import (
+    InteractiveMedia,
+    InteractiveMediaGroup,
+    InteractiveMediaButton,
+    InteractiveMediaWidget,
+)
+
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -100,65 +107,67 @@ def help_handler(update: UpdateMessage) -> None:
 """)
 
 def text_handler(update: UpdateMessage, widget=None):
-    text = update.message.text_message.text.strip().lower()
-    user_id = update.peer.id
+    text = update.message.text.lower()
+    peer = update.peer
+    user_id = peer.id
 
-    # Проверка через GigaChat (семантический смысл)
-    action = check_general_message_with_gigachat(text)
+    # Получаем ответ от GigaChat
+    response_text, is_maybe_idea, command = check_general_message_with_gigachat(text)
+    bot.messaging.send_message(peer, f"🤖 GigaChat ответил:\n\n{response_text}")
 
-    if action == "help":
-        help_handler(update)
-        bot.messaging.send_message(
-            update.peer,
-            "Чем могу помочь?",
-            [InteractiveMediaGroup([
-                InteractiveMedia(InteractiveMediaButton("Хочу начать", "start")),
-                InteractiveMedia(InteractiveMediaButton("Скачать агентов", "agents")),
-                InteractiveMedia(InteractiveMediaButton("Инициативы", "groups")),
-            ])]
+    if command:
+        if command == "start":
+            start_handler(update)
+        elif command == "help":
+            help_handler(update)
+        elif command == "idea":
+            idea_handler(update)
+        elif command == "ai_agent":
+            agent_handler(update)
+        elif command == "group":
+            group_handler(update)
+
+        # Показываем кнопки
+        media_group = InteractiveMediaGroup(
+            media=[
+                InteractiveMedia(
+                    widget=InteractiveMediaWidget(
+                        buttons=[
+                            InteractiveMediaButton("🟢 Начать", "start"),
+                            InteractiveMediaButton("📝 Описать идею", "idea"),
+                            InteractiveMediaButton("📂 Скачать агентов", "ai_agent"),
+                            InteractiveMediaButton("🔍 Найти инициативы", "group"),
+                            InteractiveMediaButton("📮 Помощь", "help"),
+                        ]
+                    )
+                )
+            ]
         )
+        bot.messaging.send_message(peer, "🔘 Выберите действие:", [media_group])
+        return
 
-    elif action == "start":
-        start_handler(update)
-        bot.messaging.send_message(
-            update.peer,
-            "Запускаю для вас систему...",
-            [InteractiveMediaGroup([
-                InteractiveMedia(InteractiveMediaButton("Помощь", "help")),
-                InteractiveMedia(InteractiveMediaButton("Скачать агентов", "agents")),
-            ])]
+    # Обработка идей (если это идея)
+    if is_maybe_idea:
+        user_states[user_id] = {"mode": "choose"}
+        bot.messaging.send_message(peer,
+            "🧠 Похоже, у вас идея! Хотите её оформить?\n\n"
+            "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею.\n"
+            "2️⃣ *Я сам напишу* — напишите идею одним сообщением.\n\n"
+            "👉 Напишите `шаблон` или `сам`, или нажмите кнопку ниже:")
+        
+        idea_group = InteractiveMediaGroup(
+            media=[
+                InteractiveMedia(
+                    widget=InteractiveMediaWidget(
+                        buttons=[
+                            InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
+                            InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать"),
+                        ]
+                    )
+                )
+            ]
         )
-
-    elif action == "agents":
-        agent_handler(update)
-        bot.messaging.send_message(
-            update.peer,
-            "Вот ссылки для скачивания агентов:",
-            [InteractiveMediaGroup([
-                InteractiveMedia(InteractiveMediaButton("Назад", "help")),
-            ])]
-        )
-
-    elif action == "groups":
-        group_handler(update)
-        bot.messaging.send_message(
-            update.peer,
-            "Список инициатив:",
-            [InteractiveMediaGroup([
-                InteractiveMedia(InteractiveMediaButton("Хочу начать", "start")),
-                InteractiveMedia(InteractiveMediaButton("Помощь", "help")),
-            ])]
-        )
-
-    else:
-        bot.messaging.send_message(
-            update.peer,
-            "Я не понял, что вы хотите. Попробуйте написать «помоги», «хочу начать», «скачать агентов» или «посмотреть инициативы».",
-            [InteractiveMediaGroup([
-                InteractiveMedia(InteractiveMediaButton("Помощь", "help")),
-                InteractiveMedia(InteractiveMediaButton("Начать", "start")),
-            ])]
-        )
+        bot.messaging.send_message(peer, "Выберите формат описания идеи:", [idea_group])
 
 def main():
     global bot
