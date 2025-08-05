@@ -1,6 +1,7 @@
 import os
 import logging
 from dotenv import load_dotenv
+
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
@@ -33,6 +34,7 @@ TEMPLATE_FIELDS = [
 ]
 
 user_states = {}
+bot = None  # Глобальная переменная
 
 def format_response(text: str) -> str:
     lines = text.strip().split("\n")
@@ -77,14 +79,12 @@ def idea_handler(update: UpdateMessage) -> None:
         "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
         "👉 Напиши `шаблон` или `сам`, или нажми кнопку ниже:")
 
-    media_group = InteractiveMediaGroup(
-        media=[
-            InteractiveMedia([
-                InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-                InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
-            ])
-        ]
-    )
+    media_group = InteractiveMediaGroup([
+        InteractiveMedia([
+            InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
+            InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
+        ])
+    ])
     bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
 
 def agent_handler(update: UpdateMessage) -> None:
@@ -127,6 +127,9 @@ def help_handler(update: UpdateMessage) -> None:
     ])
 
 def text_handler(update: UpdateMessage, widget=None):
+    if not update.message or not update.message.text_message:
+        return
+
     text = update.message.text_message.text.strip()
     user_id = update.peer.id
     peer = update.peer
@@ -136,7 +139,7 @@ def text_handler(update: UpdateMessage, widget=None):
     logging.info(f"📩 Пользователь: {text}")
     logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}, Похоже на идею: {maybe_idea}")
 
-    # Обработка команд через текст
+    # Обработка распознанных команд
     if command == "help":
         help_handler(update)
         return
@@ -157,7 +160,7 @@ def text_handler(update: UpdateMessage, widget=None):
         idea_handler(update)
         return
 
-    # Если GigaChat распознал идею
+    # Если распознана идея
     if maybe_idea:
         bot.messaging.send_message(peer, "💡 Похоже, вы описали идею. Сейчас проверю...")
 
@@ -183,14 +186,14 @@ def text_handler(update: UpdateMessage, widget=None):
             bot.messaging.send_message(peer, "🤔 Вы хотите проверить идею на уникальность? Могу помочь!")
 
     else:
-        # Если ничего не распознано — просто ответ от GigaChat
+        # Ответ по умолчанию с кнопками
         bot.messaging.send_message(
             peer,
             gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз.",
             [InteractiveMediaGroup([
                 InteractiveMedia([
                     InteractiveMediaButton("Помощь", "help"),
-                    InteractiveMediaButton("Начать", "start"),
+                    InteractiveMediaButton("Хочу начать", "start")
                 ])
             ])]
         )
