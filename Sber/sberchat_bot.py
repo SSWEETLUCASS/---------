@@ -5,11 +5,6 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
-from dialog_bot_sdk.interactive_media import (
-    InteractiveMedia,
-    InteractiveMediaGroup,
-    InteractiveMediaButton,
-)
 
 from ai_agent import (
     check_general_message_with_gigachat,
@@ -57,17 +52,6 @@ def start_handler(update: UpdateMessage) -> None:
 4. *Поддержка📝* — задать вопрос команде
 """)
 
-    bot.messaging.send_message(update.peer, "Выберите действие:", [
-        InteractiveMediaGroup([
-            InteractiveMedia([
-                InteractiveMediaButton("Помощь", "help"),
-                InteractiveMediaButton("Скачать агентов", "agents"),
-                InteractiveMediaButton("Инициативы", "groups"),
-                InteractiveMediaButton("Проверить идею", "idea"),
-            ])
-        ])
-    ])
-
 def idea_handler(update: UpdateMessage) -> None:
     peer = update.peer
     user_id = peer.id
@@ -77,15 +61,7 @@ def idea_handler(update: UpdateMessage) -> None:
         "📝 *Как вы хотите описать свою идею?*\n\n"
         "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею по полям.\n"
         "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
-        "👉 Напиши `шаблон` или `сам`, или нажми кнопку ниже:")
-
-    media_group = InteractiveMediaGroup([
-        InteractiveMedia([
-            InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-            InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
-        ])
-    ])
-    bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
+        "👉 Напиши `шаблон` или `сам`.")
 
 def agent_handler(update: UpdateMessage) -> None:
     peer = update.peer
@@ -116,16 +92,6 @@ def help_handler(update: UpdateMessage) -> None:
 📧 sigma.sbrf.ru@22754707
 """)
 
-    bot.messaging.send_message(update.peer, "Могу предложить:", [
-        InteractiveMediaGroup([
-            InteractiveMedia([
-                InteractiveMediaButton("Хочу начать", "start"),
-                InteractiveMediaButton("Скачать агентов", "agents"),
-                InteractiveMediaButton("Инициативы", "groups"),
-            ])
-        ])
-    ])
-
 def text_handler(update: UpdateMessage, widget=None):
     if not update.message or not update.message.text_message:
         return
@@ -139,7 +105,6 @@ def text_handler(update: UpdateMessage, widget=None):
     logging.info(f"📩 Пользователь: {text}")
     logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}, Похоже на идею: {maybe_idea}")
 
-    # Обработка распознанных команд
     if command == "help":
         help_handler(update)
         return
@@ -160,12 +125,12 @@ def text_handler(update: UpdateMessage, widget=None):
         idea_handler(update)
         return
 
-    # Если распознана идея
     if maybe_idea:
         bot.messaging.send_message(peer, "💡 Похоже, вы описали идею. Сейчас проверю...")
 
         user_data = {"Описание в свободной форме": text}
-        response, is_unique, parsed_data, suggest_processing = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
+        response, is_unique, parsed_data, suggest_processing = check_idea_with_gigachat_local(
+            text, user_data, is_free_form=True)
 
         bot.messaging.send_message(peer, f"🧠 Ответ GigaChat:\n\n{format_response(response)}")
 
@@ -186,17 +151,7 @@ def text_handler(update: UpdateMessage, widget=None):
             bot.messaging.send_message(peer, "🤔 Вы хотите проверить идею на уникальность? Могу помочь!")
 
     else:
-        # Ответ по умолчанию с кнопками
-        bot.messaging.send_message(
-            peer,
-            gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз.",
-            [InteractiveMediaGroup([
-                InteractiveMedia([
-                    InteractiveMediaButton("Помощь", "help"),
-                    InteractiveMediaButton("Хочу начать", "start")
-                ])
-            ])]
-        )
+        bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз.")
 
 def main():
     global bot
