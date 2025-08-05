@@ -38,7 +38,7 @@ def format_response(text: str) -> str:
         if not line.strip().startswith("#") else f"\n{line.strip('#').strip()}\n"
         for line in lines if line.strip()
     ])
-    return formatted.strip()
+    return formatted.encode('latin1').decode('utf-8')
 
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
