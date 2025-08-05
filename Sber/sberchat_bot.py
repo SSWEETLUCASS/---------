@@ -99,102 +99,66 @@ def help_handler(update: UpdateMessage) -> None:
 📧 sigma.sbrf.ru@22754707
 """)
 
-def text_handler(update: UpdateMessage) -> None:
-    message = update.message
-    peer = update.peer
-    user_id = peer.id
+def text_handler(update: UpdateMessage):
+    text = update.message.text_message.text.strip().lower()
+    user_id = update.peer.id
 
-    msg = message.text_message.text.strip() if message.text_message and message.text_message.text else ""
-    state = user_states.get(user_id, {})
-    logging.info(f"📩 Сообщение от {user_id} | msg: '{msg}' | state: {state}")
+    # Проверка через GigaChat (семантический смысл)
+    action = check_general_message_with_gigachat(text)
 
-    if msg.lower() in ["/start", "./start", "start"]:
-        start_handler(update)
-        return
-    elif msg.lower() in ["/idea", "idea", "идея", "придумал"]:
-        idea_handler(update)
-        return
-    elif msg.lower() in ["/ai", "ai", "агент", "агентолог"]:
-        agent_handler(update)
-        return
-    elif msg.lower() in ["/help", "help", "помощь"]:
+    if action == "help":
         help_handler(update)
-        return
-    elif msg.lower() in ["/кто поможет?", "ai_agent", "агенты", "группа"]:
-        group_handler(update)
-        return
-
-    if state.get("mode") == "choose":
-        msg_clean = msg.lower()
-        if msg_clean in ["шаблон", "давай шаблон!", "хочу шаблон", "по шаблону"]:
-            user_states[user_id] = {"mode": "template", "step": 0, "data": {}}
-            bot.messaging.send_message(peer, "✅ Вы выбрали: *Шаблон*\nДавайте начнём заполнение.")
-            bot.messaging.send_message(peer, f"1️⃣ {TEMPLATE_FIELDS[0]}:")
-            return
-        elif msg_clean in ["сам", "свободно", "хочу сам", "я могу и сам написать"]:
-            user_states[user_id] = {"mode": "freeform", "awaiting_text": True}
-            bot.messaging.send_message(peer, "✅ Вы выбрали: *Свободная форма*\nНапишите вашу идею или вопрос:")
-            return
-        else:
-            bot.messaging.send_message(peer, "⚠️ Пожалуйста, напишите `шаблон` или `сам`.")
-            return
-
-    if state.get("mode") == "template":
-        step = state.get("step", 0)
-        field = TEMPLATE_FIELDS[step]
-        state.setdefault("data", {})
-        state["data"][field] = msg
-        step += 1
-
-        if step < len(TEMPLATE_FIELDS):
-            user_states[user_id]["step"] = step
-            bot.messaging.send_message(peer, f"{step + 1}️⃣ {TEMPLATE_FIELDS[step]}:")
-        else:
-            bot.messaging.send_message(peer, "✅ Проверяю инициативу через GigaChat...")
-            result, is_unique, _, _ = check_idea_with_gigachat_local("", state["data"], is_free_form=False)
-            bot.messaging.send_message(peer, f"🤖 GigaChat ответил:\n\n{format_response(result)}")
-            if is_unique:
-                word_path, excel_path = generate_files(state["data"])
-                bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
-                bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
-            user_states.pop(user_id)
-        return
-
-    if state.get("mode") == "freeform" and state.get("awaiting_text"):
-        user_data = {"Описание в свободной форме": msg}
-        bot.messaging.send_message(peer, "🔍 Отправляю в GigaChat...")
-        response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(msg, user_data, is_free_form=True)
-        bot.messaging.send_message(peer, f"🤖 GigaChat ответил:\n\n{format_response(response)}")
-
-        if is_unique and parsed_data:
-            word_path, excel_path = generate_files(parsed_data)
-            bot.messaging.send_file(peer, open(word_path, "rb"), filename=os.path.basename(word_path))
-            bot.messaging.send_file(peer, open(excel_path, "rb"), filename=os.path.basename(excel_path))
-
-        user_states.pop(user_id)
-        return
-
-    response_text, is_maybe_idea = check_general_message_with_gigachat(msg)
-    bot.messaging.send_message(peer, f"🤖 GigaChat ответил:\n\n{format_response(response_text)}")
-
-    if is_maybe_idea:
-        user_states[user_id] = {"mode": "choose"}
-        bot.messaging.send_message(peer,
-            "🧠 Похоже, у вас идея! Хотите её оформить?\n\n"
-            "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею по полям.\n"
-            "2️⃣ *Я могу и сам написать* — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
-            "👉 Напиши `шаблон` или `сам`, или нажми кнопку ниже:")
-        media_group = InteractiveMediaGroup(
-            media=[
-                InteractiveMedia(
-                    buttons=[
-                        InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-                        InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
-                    ]
-                )
-            ]
+        bot.messaging.send_message(
+            update.peer,
+            "Чем могу помочь?",
+            [InteractiveMediaGroup([
+                InteractiveMedia(InteractiveMediaButton("Хочу начать", "start")),
+                InteractiveMedia(InteractiveMediaButton("Скачать агентов", "agents")),
+                InteractiveMedia(InteractiveMediaButton("Инициативы", "groups")),
+            ])]
         )
-        bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
+
+    elif action == "start":
+        start_handler(update)
+        bot.messaging.send_message(
+            update.peer,
+            "Запускаю для вас систему...",
+            [InteractiveMediaGroup([
+                InteractiveMedia(InteractiveMediaButton("Помощь", "help")),
+                InteractiveMedia(InteractiveMediaButton("Скачать агентов", "agents")),
+            ])]
+        )
+
+    elif action == "agents":
+        agent_handler(update)
+        bot.messaging.send_message(
+            update.peer,
+            "Вот ссылки для скачивания агентов:",
+            [InteractiveMediaGroup([
+                InteractiveMedia(InteractiveMediaButton("Назад", "help")),
+            ])]
+        )
+
+    elif action == "groups":
+        group_handler(update)
+        bot.messaging.send_message(
+            update.peer,
+            "Список инициатив:",
+            [InteractiveMediaGroup([
+                InteractiveMedia(InteractiveMediaButton("Хочу начать", "start")),
+                InteractiveMedia(InteractiveMediaButton("Помощь", "help")),
+            ])]
+        )
+
+    else:
+        bot.messaging.send_message(
+            update.peer,
+            "Я не понял, что вы хотите. Попробуйте написать «помоги», «хочу начать», «скачать агентов» или «посмотреть инициативы».",
+            [InteractiveMediaGroup([
+                InteractiveMedia(InteractiveMediaButton("Помощь", "help")),
+                InteractiveMedia(InteractiveMediaButton("Начать", "start")),
+            ])]
+        )
 
 def main():
     global bot
