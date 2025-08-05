@@ -99,7 +99,7 @@ def help_handler(update: UpdateMessage) -> None:
 📧 sigma.sbrf.ru@22754707
 """)
 
-def text_handler(update: UpdateMessage):
+def text_handler(update: UpdateMessage, widget=None):
     text = update.message.text_message.text.strip().lower()
     user_id = update.peer.id
 
