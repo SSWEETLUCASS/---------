@@ -31,15 +31,6 @@ TEMPLATE_FIELDS = [
 user_states = {}
 bot = None  # Глобальная переменная
 
-def format_response(text: str) -> str:
-    lines = text.strip().split("\n")
-    formatted = "\n".join([
-        f"• {line.strip().lstrip('*').rstrip('*')}"
-        if not line.strip().startswith("#") else f"\n{line.strip('#').strip()}\n"
-        for line in lines if line.strip()
-    ])
-    return formatted.encode('latin1').decode('utf-8')
-
 def start_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
 👋 Привет!
@@ -83,7 +74,7 @@ def group_handler(update: UpdateMessage) -> None:
     user_data = {"Файл": agents_file_path}
     bot.messaging.send_message(peer, "🔍 Выполняю поиск через GigaChat...")
     response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(query_text, user_data, is_free_form=True)
-    bot.messaging.send_message(peer, f"🤖 Результат:\n\n{format_response(response)}")
+    bot.messaging.send_message(peer, f"🤖 Результат:\n\n{(response)}")
 
 def help_handler(update: UpdateMessage) -> None:
     bot.messaging.send_message(update.peer, """
@@ -132,7 +123,7 @@ def text_handler(update: UpdateMessage, widget=None):
         response, is_unique, parsed_data, suggest_processing = check_idea_with_gigachat_local(
             text, user_data, is_free_form=True)
 
-        bot.messaging.send_message(peer, f"🧠 Ответ GigaChat:\n\n{format_response(response)}")
+        bot.messaging.send_message(peer, f"🧠 Ответ GigaChat:\n\n{(response)}")
 
         if parsed_data:
             word_path, excel_path = generate_files(parsed_data)
