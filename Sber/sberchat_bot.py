@@ -4,16 +4,17 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
-from ai_agent import check_general_message_with_gigachat, check_idea_with_gigachat_local, generate_files
-
-
 from dialog_bot_sdk.interactive_media import (
     InteractiveMedia,
     InteractiveMediaGroup,
     InteractiveMediaButton,
-    InteractiveMediaWidget,
 )
 
+from ai_agent import (
+    check_general_message_with_gigachat,
+    check_idea_with_gigachat_local,
+    generate_files,
+)
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -54,6 +55,17 @@ def start_handler(update: UpdateMessage) -> None:
 4. *Поддержка📝* — задать вопрос команде
 """)
 
+    bot.messaging.send_message(update.peer, "Выберите действие:", [
+        InteractiveMediaGroup([
+            InteractiveMedia([
+                InteractiveMediaButton("Помощь", "help"),
+                InteractiveMediaButton("Скачать агентов", "agents"),
+                InteractiveMediaButton("Инициативы", "groups"),
+                InteractiveMediaButton("Проверить идею", "idea"),
+            ])
+        ])
+    ])
+
 def idea_handler(update: UpdateMessage) -> None:
     peer = update.peer
     user_id = peer.id
@@ -67,12 +79,10 @@ def idea_handler(update: UpdateMessage) -> None:
 
     media_group = InteractiveMediaGroup(
         media=[
-            InteractiveMedia(
-                buttons=[
-                    InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-                    InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
-                ]
-            )
+            InteractiveMedia([
+                InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
+                InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать")
+            ])
         ]
     )
     bot.messaging.send_message(peer, "Выберите формат описания идеи:", [media_group])
@@ -106,68 +116,84 @@ def help_handler(update: UpdateMessage) -> None:
 📧 sigma.sbrf.ru@22754707
 """)
 
+    bot.messaging.send_message(update.peer, "Могу предложить:", [
+        InteractiveMediaGroup([
+            InteractiveMedia([
+                InteractiveMediaButton("Хочу начать", "start"),
+                InteractiveMediaButton("Скачать агентов", "agents"),
+                InteractiveMediaButton("Инициативы", "groups"),
+            ])
+        ])
+    ])
+
 def text_handler(update: UpdateMessage, widget=None):
-    text = update.message.text.lower()
+    text = update.message.text_message.text.strip()
+    user_id = update.peer.id
     peer = update.peer
-    user_id = peer.id
 
-    # Получаем ответ от GigaChat
-    response_text, is_maybe_idea, command = check_general_message_with_gigachat(text)
-    bot.messaging.send_message(peer, f"🤖 GigaChat ответил:\n\n{response_text}")
+    gpt_response, maybe_idea, command = check_general_message_with_gigachat(text)
 
-    if command:
-        if command == "start":
-            start_handler(update)
-        elif command == "help":
-            help_handler(update)
-        elif command == "idea":
-            idea_handler(update)
-        elif command == "ai_agent":
-            agent_handler(update)
-        elif command == "group":
-            group_handler(update)
+    logging.info(f"📩 Пользователь: {text}")
+    logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}, Похоже на идею: {maybe_idea}")
 
-        # Показываем кнопки
-        media_group = InteractiveMediaGroup(
-            media=[
-                InteractiveMedia(
-                    widget=InteractiveMediaWidget(
-                        buttons=[
-                            InteractiveMediaButton("🟢 Начать", "start"),
-                            InteractiveMediaButton("📝 Описать идею", "idea"),
-                            InteractiveMediaButton("📂 Скачать агентов", "ai_agent"),
-                            InteractiveMediaButton("🔍 Найти инициативы", "group"),
-                            InteractiveMediaButton("📮 Помощь", "help"),
-                        ]
-                    )
-                )
-            ]
-        )
-        bot.messaging.send_message(peer, "🔘 Выберите действие:", [media_group])
+    # Обработка команд через текст
+    if command == "help":
+        help_handler(update)
         return
 
-    # Обработка идей (если это идея)
-    if is_maybe_idea:
-        user_states[user_id] = {"mode": "choose"}
-        bot.messaging.send_message(peer,
-            "🧠 Похоже, у вас идея! Хотите её оформить?\n\n"
-            "1️⃣ *Давай шаблон!* — я помогу поэтапно сформулировать идею.\n"
-            "2️⃣ *Я сам напишу* — напишите идею одним сообщением.\n\n"
-            "👉 Напишите `шаблон` или `сам`, или нажмите кнопку ниже:")
-        
-        idea_group = InteractiveMediaGroup(
-            media=[
-                InteractiveMedia(
-                    widget=InteractiveMediaWidget(
-                        buttons=[
-                            InteractiveMediaButton("Давай шаблон!", "Давай шаблон!"),
-                            InteractiveMediaButton("Я могу и сам написать", "Я могу и сам написать"),
-                        ]
-                    )
-                )
-            ]
+    elif command == "start":
+        start_handler(update)
+        return
+
+    elif command == "ai_agent":
+        agent_handler(update)
+        return
+
+    elif command == "group":
+        group_handler(update)
+        return
+
+    elif command == "idea":
+        idea_handler(update)
+        return
+
+    # Если GigaChat распознал идею
+    if maybe_idea:
+        bot.messaging.send_message(peer, "💡 Похоже, вы описали идею. Сейчас проверю...")
+
+        user_data = {"Описание в свободной форме": text}
+        response, is_unique, parsed_data, suggest_processing = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
+
+        bot.messaging.send_message(peer, f"🧠 Ответ GigaChat:\n\n{format_response(response)}")
+
+        if parsed_data:
+            word_path, excel_path = generate_files(parsed_data)
+            bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
+
+            with open(word_path, "rb") as f_docx:
+                bot.messaging.send_file(peer, f_docx, filename=os.path.basename(word_path))
+
+            with open(excel_path, "rb") as f_xlsx:
+                bot.messaging.send_file(peer, f_xlsx, filename=os.path.basename(excel_path))
+
+            os.remove(word_path)
+            os.remove(excel_path)
+
+        elif suggest_processing:
+            bot.messaging.send_message(peer, "🤔 Вы хотите проверить идею на уникальность? Могу помочь!")
+
+    else:
+        # Если ничего не распознано — просто ответ от GigaChat
+        bot.messaging.send_message(
+            peer,
+            gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз.",
+            [InteractiveMediaGroup([
+                InteractiveMedia([
+                    InteractiveMediaButton("Помощь", "help"),
+                    InteractiveMediaButton("Начать", "start"),
+                ])
+            ])]
         )
-        bot.messaging.send_message(peer, "Выберите формат описания идеи:", [idea_group])
 
 def main():
     global bot
