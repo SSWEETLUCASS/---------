@@ -288,27 +288,46 @@ def text_handler(update: UpdateMessage, widget=None):
 
     # Обработка общих сообщений (когда пользователь в главном меню)
     try:
+        # Сначала проверяем, является ли сообщение командой
+        if text.startswith('/'):
+            command = text[1:].lower()
+            if command == "start":
+                start_handler(update)
+            elif command == "idea":
+                idea_handler(update)
+            elif command == "ai_agent":
+                agent_handler(update)
+            elif command == "group":
+                group_handler(update)
+            elif command == "help":
+                help_handler(update)
+            else:
+                bot.messaging.send_message(peer, "❌ Неизвестная команда. Напишите `/start` для просмотра доступных команд.")
+            return
+        
+        # Если это не команда, используем GigaChat для анализа сообщения
         gpt_response, maybe_idea, command = check_general_message_with_gigachat(text)
         
         logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}, Похоже на идею: {maybe_idea}")
 
-        if command == "help":
-            help_handler(update)
+        if command:
+            # Если GigaChat определил, что это команда
+            if command == "help":
+                help_handler(update)
+            elif command == "start":
+                start_handler(update)
+            elif command == "ai_agent":
+                agent_handler(update)
+            elif command == "group":
+                group_handler(update)
+            elif command == "idea":
+                idea_handler(update)
+            else:
+                bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз или напишите `/start`")
             return
-        elif command == "start":
-            start_handler(update)
-            return
-        elif command == "ai_agent":
-            agent_handler(update)
-            return
-        elif command == "group":
-            group_handler(update)
-            return
-        elif command == "idea":
-            idea_handler(update)
-            return
-
+        
         if maybe_idea:
+            # Если GigaChat определил, что это идея
             bot.messaging.send_message(peer, "💡 Похоже, вы описали идею. Сейчас проверю...")
             
             user_data = {"Описание в свободной форме": text}
@@ -332,8 +351,8 @@ def text_handler(update: UpdateMessage, widget=None):
 
             elif suggest_processing:
                 bot.messaging.send_message(peer, "🤔 Хотите проверить идею на уникальность? Напишите `/idea`!")
-
         else:
+            # Если это обычное сообщение
             bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз или напишите `/start`")
     
     except Exception as e:
