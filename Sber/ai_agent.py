@@ -260,7 +260,7 @@ def check_general_message_with_gigachat(msg: str) -> tuple[str, bool, str | None
            - начать заново или главное меню → CMD:start
            - получить помощь → CMD:help  
            - узнать про агентов или скачать список → CMD:ai_agent
-           - найти владельцев или контакты → CMD:group
+           - найти владельцев или контакты → CMD:search_owners
            - описать/проверить идею → CMD:idea
         
         5. Если ничего из выше перечисленного не подходит, дай полезный ответ по смыслу.
