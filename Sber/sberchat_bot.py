@@ -34,6 +34,32 @@ TEMPLATE_FIELDS = [
 user_states = {}
 bot = None  # Глобальная переменная
 
+def send_file_sync(
+    bot_instance,
+    peer,
+    file,
+    text: str = None,
+    uid: int = None,
+    name: str = None,
+    verify: bool = None,
+    is_forward_ban: bool = False,
+    reply: list = None,
+    forward: list = None,
+    interactive_media_groups: list = None,
+):
+    return bot_instance.messaging.send_filewrapped(
+        peer,
+        file,
+        uid,
+        text,
+        name,
+        verify,
+        is_forward_ban,
+        reply,
+        forward,
+        interactive_media_groups
+    )
+
 def start_handler(update: UpdateMessage) -> None:
     """Обработчик команды /start"""
     user_id = update.peer.id
@@ -112,12 +138,12 @@ def agent_handler(update: UpdateMessage) -> None:
         
         # Отправляем оригинальный файл
         with open(agents_file_path, "rb") as f:
-            bot.messaging.send_file(peer, f, filename="agents.xlsx")
+            send_file_sync(bot, peer, f, name="agents.xlsx")
         
         # Отправляем аналитический отчет
         if summary_file and os.path.exists(summary_file):
             with open(summary_file, "rb") as f:
-                bot.messaging.send_file(peer, f, filename=os.path.basename(summary_file))
+                send_file_sync(bot, peer, f, name=os.path.basename(summary_file))
             os.remove(summary_file)  # Удаляем временный файл
             
     except Exception as e:
@@ -219,10 +245,10 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
                 bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
                 
                 with open(word_path, "rb") as f_docx:
-                    bot.messaging.send_file(peer, f_docx, filename=os.path.basename(word_path))
+                    send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path))
                 
                 with open(excel_path, "rb") as f_xlsx:
-                    bot.messaging.send_file(peer, f_xlsx, filename=os.path.basename(excel_path))
+                    send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path))
                 
                 os.remove(word_path)
                 os.remove(excel_path)
@@ -293,10 +319,10 @@ def text_handler(update: UpdateMessage, widget=None):
                 bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
                 
                 with open(word_path, "rb") as f_docx:
-                    bot.messaging.send_file(peer, f_docx, filename=os.path.basename(word_path))
+                    send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path))
                 
                 with open(excel_path, "rb") as f_xlsx:
-                    bot.messaging.send_file(peer, f_xlsx, filename=os.path.basename(excel_path))
+                    send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path))
                 
                 os.remove(word_path)
                 os.remove(excel_path)
@@ -405,10 +431,10 @@ def text_handler(update: UpdateMessage, widget=None):
                 bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
 
                 with open(word_path, "rb") as f_docx:
-                    bot.messaging.send_file(peer, f_docx, filename=os.path.basename(word_path))
+                    send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path))
 
                 with open(excel_path, "rb") as f_xlsx:
-                    bot.messaging.send_file(peer, f_xlsx, filename=os.path.basename(excel_path))
+                    send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path))
 
                 os.remove(word_path)
                 os.remove(excel_path)
