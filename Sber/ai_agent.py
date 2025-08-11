@@ -244,7 +244,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
     except Exception as e:
         return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, {}, False
 
-def check_general_message_with_gigachat(msg: str) -> tuple[str, bool, str | None]:
+def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[str, bool, str | None]:
     """Проверка общего сообщения с помощью GigaChat"""
     try:
         prompt = f"""
@@ -283,12 +283,11 @@ def check_general_message_with_gigachat(msg: str) -> tuple[str, bool, str | None
         response = clean_response_text(raw_response)
 
         # Сохраняем в память для пользователя (если user_id известен)
-        user_id = user_data.get("user_id")
         if user_id:
             gigachat_memory[user_id].append({
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "input": prompt.strip(),
-                "output": response_text.strip()
+                "output": response.strip()
             })
 
         # Извлекаем команду

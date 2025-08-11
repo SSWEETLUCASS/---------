@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
@@ -12,27 +13,32 @@ from ai_agent import (
     generate_agents_summary_file,
     find_agent_owners,
     generate_idea_suggestions,
-    calculate_work_cost,  # Новая функция
+    calculate_work_cost,
 )
+
+# Загрузка конфигурации
+with open('config.json', 'r', encoding='utf-8') as f:
+    config = json.load(f)
 
 # Загрузка переменных окружения
 load_dotenv()
 
 # Установка путей к сертификатам
-os.environ["REQUESTS_CA_BUNDLE"] = "/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/SberCA.pem"
-os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = "/home/sigma.sbrf.ru@22754707/Рабочий стол/main_chat_bot/test/certs/russiantrustedca.pem"
+os.environ["REQUESTS_CA_BUNDLE"] = config['file_settings']['certificates']['requests_ca_bundle']
+os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = config['file_settings']['certificates']['grpc_roots']
 
 BOT_TOKEN = os.getenv("DIALOG_BOT_TOKEN")
-logging.basicConfig(level=logging.INFO)
 
-TEMPLATE_FIELDS = [
-    "Название инициативы", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
-    "Как процесс выглядит сейчас? as-is", "Какой результат нужен от агента?",
-    "Достижимый идеал(to-be)", "Масштаб процесса"
-]
+# Настройка логирования
+logging.basicConfig(
+    level=config['logging']['level'],
+    format=config['logging']['format'],
+    filename=config['logging']['file']
+)
 
+# Глобальные переменные
 user_states = {}
-bot = None  # Глобальная переменная
+bot = None
 
 def send_file_sync(
     bot_instance,
@@ -51,7 +57,6 @@ def send_file_sync(
     try:
         logging.info(f"🔄 Отправляем файл: {name}")
         
-        # Проверяем, что файл существует и не пустой
         if hasattr(file, 'name') and os.path.exists(file.name):
             file_size = os.path.getsize(file.name)
             logging.info(f"📊 Размер файла: {file_size} байт")
@@ -60,7 +65,6 @@ def send_file_sync(
                 logging.warning("⚠️ Файл пуст!")
                 return None
         
-        # Отправляем файл через Dialog Bot SDK
         result = bot_instance.messaging.send_file(
             peer=peer,
             file=file,
@@ -73,7 +77,6 @@ def send_file_sync(
         
     except Exception as e:
         logging.error(f"❌ Ошибка отправки файла: {e}")
-        # Пробуем альтернативный метод
         try:
             result = bot_instance.messaging.send_filewrapped(
                 peer,
@@ -96,50 +99,8 @@ def send_file_sync(
 def start_handler(update: UpdateMessage) -> None:
     """Обработчик команды /start"""
     user_id = update.peer.id
-    user_states[user_id] = {"mode": "main_menu"}
-    
-    bot.messaging.send_message(update.peer, """
-🤖 **Добро пожаловать в Агентолог!**
-
-Я ваш персональный помощник по разработке AI-агентов. Помогу проверить уникальность идей, найти существующие решения и создать техническое описание вашей инициативы.
-
-**🔧 Мои возможности:**
-
-💡 **У меня есть идея!** — проверю уникальность и создам техническое описание
-   • Сравню с существующими агентами
-   • Проанализирую на практичность
-   • Рассчитаю стоимость работы
-   • Создам Word и Excel документы
-
-📊 **АИ-агенты?** — предоставлю актуальный список реализованных агентов
-   • База всех существующих инициатив
-   • Аналитические отчеты
-   • Статистика по типам и блокам
-
-🔍 **Поиск владельцев** — найду владельцев и контакты по вашему запросу
-   • Поиск экспертов по области
-   • Контактная информация
-   • Рекомендации по сотрудничеству
-
-🧠 **Помоги с идеей!** — предложу варианты для автоматизации
-   • Генерация новых идей
-   • Анализ возможностей AI
-   • Советы по реализации
-
-💬 **Консультация** — полезные ссылки и ресурсы
-   • Лучшие практики разработки AI-агентов
-   • Методологии и подходы
-   • Рекомендуемые инструменты
-
-📝 **Поддержка** — техническая помощь и консультации
-
-**🚀 Как начать:**
-• Просто опишите свою идею
-• Или выберите нужную функцию
-• Напишите команду или задайте вопрос
-
-Готов помочь! Что вас интересует? 🎯
-""")
+    user_states[user_id] = {"mode": config['states']['main_menu']}
+    bot.messaging.send_message(update.peer, config['bot_settings']['commands']['start']['response'])
 
 def idea_handler(update: UpdateMessage) -> None:
     """Обработчик для работы с идеями"""
@@ -147,24 +108,24 @@ def idea_handler(update: UpdateMessage) -> None:
     user_id = peer.id
     
     if user_id in user_states and user_states[user_id].get("mode", "").startswith("idea_"):
-        bot.messaging.send_message(peer, "Вы уже в процессе работы с идеей. Продолжайте заполнение.")
+        bot.messaging.send_message(peer, config['error_messages']['already_in_process'])
         return
     
-    user_states[user_id] = {"mode": "idea_choose_format", "current_field": 0, "idea_data": {}}
-    bot.messaging.send_message(peer,
-        "📝 **Как вы хотите описать свою идею?**\n\n"
-        "1️⃣ **Давай шаблон!** — я помогу поэтапно сформулировать идею по полям.\n"
-        "2️⃣ **Я могу и сам написать** — если ты уже знаешь, что хочешь, напиши всё одним сообщением.\n\n"
-        "👉 Напиши `шаблон` или `сам`.")
+    user_states[user_id] = {
+        "mode": config['states']['idea_choose_format'],
+        "current_field": 0,
+        "idea_data": {}
+    }
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
 
 def agent_handler(update: UpdateMessage) -> None:
     """Обработчик для получения списка AI-агентов"""
     peer = update.peer
     
     try:
-        agents_file_path = "agents.xlsx"
+        agents_file_path = config['file_settings']['agents_file']
         if not os.path.exists(agents_file_path):
-            bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден. Создаю новый файл...")
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_not_found'])
             from openpyxl import Workbook
             wb = Workbook()
             ws = wb.active
@@ -173,23 +134,19 @@ def agent_handler(update: UpdateMessage) -> None:
         
         summary_file = generate_agents_summary_file(agents_file_path)
         
-        bot.messaging.send_message(peer, "📊 **Актуальный список AI-агентов:**\n\n"
-                                         "📎 Прикладываю оригинальный файл и аналитический отчет!")
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['initial'])
         
-        # Отправляем основной файл
         with open(agents_file_path, "rb") as f:
             result1 = send_file_sync(bot, peer, f, name="agents.xlsx", text="📋 Основной файл с агентами")
             if not result1:
-                bot.messaging.send_message(peer, "⚠️ Ошибка отправки основного файла")
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="основной"))
         
-        # Отправляем аналитический файл
         if summary_file and os.path.exists(summary_file):
             with open(summary_file, "rb") as f:
                 result2 = send_file_sync(bot, peer, f, name=os.path.basename(summary_file), text="📊 Аналитический отчет")
                 if not result2:
-                    bot.messaging.send_message(peer, "⚠️ Ошибка отправки аналитического файла")
+                    bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
             
-            # Удаляем временный файл
             try:
                 os.remove(summary_file)
             except Exception as e:
@@ -197,7 +154,7 @@ def agent_handler(update: UpdateMessage) -> None:
             
     except Exception as e:
         logging.error(f"Ошибка в agent_handler: {e}")
-        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при обработке файла: {e}")
+        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error=e))
 
 def search_owners_handler(update: UpdateMessage) -> None:
     """Обработчик для поиска владельцев агентов"""
@@ -205,108 +162,36 @@ def search_owners_handler(update: UpdateMessage) -> None:
     user_id = peer.id
     
     try:
-        agents_file_path = "agents.xlsx"
+        agents_file_path = config['file_settings']['agents_file']
         if not os.path.exists(agents_file_path):
-            bot.messaging.send_message(peer, "⚠️ Файл с агентами не найден.")
+            bot.messaging.send_message(peer, config['error_messages']['file_not_found'])
             return
         
-        user_states[user_id] = {"mode": "search_owners"}
-        
-        bot.messaging.send_message(peer, 
-            "🔍 **Поиск владельцев AI-агентов**\n\n"
-            "Вы можете искать:\n"
-            "- По имени владельца (Иванов, Петрова)\n"
-            "- По названию агента (чат-бот, аналитика)\n"
-            "- По типу процесса (документооборот, кредитование)\n\n"
-            "👉 Напишите имя, название или тип:")
+        user_states[user_id] = {"mode": config['states']['search_owners']}
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['search_owners']['responses']['initial'])
     except Exception as e:
         logging.error(f"Ошибка в search_owners_handler: {e}")
-        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка: {e}")
+        bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
 
 def help_idea_handler(update: UpdateMessage) -> None:
     """Обработчик для помощи с генерацией идей"""
     peer = update.peer
     user_id = peer.id
     
-    user_states[user_id] = {"mode": "help_with_ideas"}
-    
-    bot.messaging.send_message(peer,
-        "🧠 **Помощь с генерацией идей для AI-агентов**\n\n"
-        "Расскажите мне:\n"
-        "• В какой области вы работаете?\n"
-        "• Какие процессы хотелось бы автоматизировать?\n"
-        "• Есть ли конкретные задачи, которые отнимают много времени?\n\n"
-        "Или просто напишите 'предложи идеи' и я дам несколько вариантов!\n\n"
-        "👉 Опишите ваш запрос:")
+    user_states[user_id] = {"mode": config['states']['help_with_ideas']}
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['initial'])
 
 def consultation_handler(update: UpdateMessage) -> None:
     """Обработчик для консультации и полезных ссылок"""
     peer = update.peer
     user_id = peer.id
     
-    user_states[user_id] = {"mode": "main_menu"}
-    
-    bot.messaging.send_message(peer, """
-💬 **Консультация и полезные ресурсы**
-
-📚 **Методологии и подходы:**
-• Design Thinking для AI - https://www.designthinking.org/ai
-• Agile разработка AI-систем - https://agilealliance.org/ai
-• Lean AI - методология быстрой разработки
-
-🛠️ **Инструменты разработки:**
-• Langchain - https://langchain.com - фреймворк для LLM
-• AutoGen - https://github.com/microsoft/autogen - мульти-агентные системы
-• CrewAI - https://crewai.com - командные AI-агенты
-
-📊 **Лучшие практики:**
-• MLOps для AI-агентов - https://mlops.org
-• AI Ethics Guidelines - принципы этичного ИИ
-• Prompt Engineering - искусство создания промптов
-
-🎓 **Обучение и сертификация:**
-• Coursera AI for Everyone - базовый курс по ИИ
-• edX Machine Learning - углубленное изучение ML
-• Kaggle Learn - бесплатные микро-курсы
-
-💡 **Идеи для вдохновения:**
-• OpenAI Cookbook - примеры использования GPT
-• Hugging Face - модели и датасеты
-• Papers with Code - научные статьи с кодом
-
-🤝 **Сообщества:**
-• AI/ML Telegram каналы
-• GitHub AI проекты
-• Reddit r/MachineLearning
-
-**💬 Нужна персональная консультация?**
-Опишите свою задачу, и я дам конкретные рекомендации!
-
-🔄 Для возврата в главное меню напишите `/start`
-""")
+    user_states[user_id] = {"mode": config['states']['main_menu']}
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['consultation']['response'])
 
 def help_handler(update: UpdateMessage) -> None:
     """Обработчик команды помощи"""
-    bot.messaging.send_message(update.peer, """
-📞 **Поддержка и контакты:**
-
-📧 **Email:** sigma.sbrf.ru@22754707
-💬 **Telegram:** @sigma.sbrf.ru@22754707
-
-🤖 **Возможности бота:**
-• Проверка уникальности идей для AI-агентов
-• Расчет стоимости разработки
-• Получение списка существующих агентов
-• Поиск владельцев и контактов
-• Генерация файлов с описанием инициатив
-• Помощь в разработке новых идей
-• Консультации и полезные ссылки
-
-💡 **Как пользоваться:**
-Просто опишите свою идею или воспользуйтесь командами в главном меню.
-
-🔄 Для возврата в главное меню напишите `/start`
-""")
+    bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
 
 def process_template_idea(update: UpdateMessage, user_id: int) -> None:
     """Обработка идеи по шаблону (поэтапно)"""
@@ -317,59 +202,52 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
     current_field = state["current_field"]
     
     if current_field > 0:
-        field_name = TEMPLATE_FIELDS[current_field - 1]
+        field_name = config['template_fields'][current_field - 1]
         state["idea_data"][field_name] = text
     
-    if current_field < len(TEMPLATE_FIELDS):
-        field_name = TEMPLATE_FIELDS[current_field]
-        bot.messaging.send_message(peer, f"📝 **{field_name}**\n\nОпишите этот аспект вашей инициативы:")
+    if current_field < len(config['template_fields']):
+        field_name = config['template_fields'][current_field]
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['template_field'].format(field=field_name))
         state["current_field"] += 1
     else:
-        bot.messaging.send_message(peer, "✅ Отлично! Все поля заполнены. Проверяю уникальность идеи и рассчитываю стоимость...")
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
         
         try:
-            # Проверяем идею и получаем стоимость
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
                 text, state["idea_data"], is_free_form=False
             )
             
-            # Рассчитываем стоимость
             cost_info = calculate_work_cost(state["idea_data"], is_unique)
-            
-            # Отправляем результат анализа
             full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n💰 **Оценка стоимости:**\n{cost_info}"
             bot.messaging.send_message(peer, full_response)
             
             if state["idea_data"]:
                 word_path, excel_path = generate_files(state["idea_data"], cost_info)
-                bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
                 
-                # Отправляем Word файл
                 with open(word_path, "rb") as f_docx:
                     result1 = send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path), text="📄 Техническое описание")
                     if not result1:
-                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Word файла")
+                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
                 
-                # Отправляем Excel файл
                 with open(excel_path, "rb") as f_xlsx:
                     result2 = send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path), text="📊 Структурированные данные")
                     if not result2:
-                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Excel файла")
+                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
                 
-                # Удаляем временные файлы
                 try:
                     os.remove(word_path)
                     os.remove(excel_path)
                 except Exception as e:
                     logging.warning(f"Не удалось удалить временные файлы: {e}")
             
-            user_states[user_id] = {"mode": "main_menu"}
+            user_states[user_id] = {"mode": config['states']['main_menu']}
             bot.messaging.send_message(peer, "\n🔄 Для новой проверки напишите `/start`")
             
         except Exception as e:
             logging.error(f"Ошибка при обработке шаблонной идеи: {e}")
-            bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при анализе: {e}")
-            user_states[user_id] = {"mode": "main_menu"}
+            bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
 
 def text_handler(update: UpdateMessage, widget=None):
     """Основной обработчик текстовых сообщений"""
@@ -379,39 +257,32 @@ def text_handler(update: UpdateMessage, widget=None):
     text = update.message.text_message.text.strip()
     user_id = update.peer.id
     peer = update.peer
-
-    state = user_states.get(user_id, {"mode": "main_menu"})
+    state = user_states.get(user_id, {"mode": config['states']['main_menu']})
     
     logging.info(f"📩 Пользователь {user_id}: {text}")
     logging.info(f"📊 Состояние: {state}")
 
-    # Обработка в зависимости от состояния
-    if state["mode"] == "idea_choose_format":
+    if state["mode"] == config['states']['idea_choose_format']:
         if "шаблон" in text.lower():
-            state["mode"] = "idea_template"
+            state["mode"] = config['states']['idea_template']
             state["current_field"] = 0
             state["idea_data"] = {}
             process_template_idea(update, user_id)
             return
         elif "сам" in text.lower():
-            state["mode"] = "idea_free_form"
-            bot.messaging.send_message(peer, 
-                "📝 **Опишите свою идею свободным текстом:**\n\n"
-                "Расскажите максимально подробно о том, что вы хотите автоматизировать "
-                "или улучшить с помощью AI-агента.")
+            state["mode"] = config['states']['idea_free_form']
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['free_form_prompt'])
             return
         else:
-            bot.messaging.send_message(peer, 
-                "❓ Не понял. Напишите `шаблон` для пошагового заполнения "
-                "или `сам` для свободного описания.")
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['template_choice_error'])
             return
     
-    elif state["mode"] == "idea_template":
+    elif state["mode"] == config['states']['idea_template']:
         process_template_idea(update, user_id)
         return
     
-    elif state["mode"] == "idea_free_form":
-        bot.messaging.send_message(peer, "💡 Анализирую вашу идею и рассчитываю стоимость...")
+    elif state["mode"] == config['states']['idea_free_form']:
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
         
         try:
             user_data = {"Описание в свободной форме": text}
@@ -419,81 +290,77 @@ def text_handler(update: UpdateMessage, widget=None):
                 text, user_data, is_free_form=True
             )
             
-            # Рассчитываем стоимость
             cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
-            
-            # Отправляем результат
             full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n💰 **Оценка стоимости:**\n{cost_info}"
             bot.messaging.send_message(peer, full_response)
             
             if parsed_data:
                 word_path, excel_path = generate_files(parsed_data, cost_info)
-                bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
                 
-                # Отправляем файлы
                 with open(word_path, "rb") as f_docx:
                     result1 = send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path), text="📄 Техническое описание")
                     if not result1:
-                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Word файла")
+                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
                 
                 with open(excel_path, "rb") as f_xlsx:
                     result2 = send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path), text="📊 Структурированные данные")
                     if not result2:
-                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Excel файла")
+                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
                 
-                # Удаляем временные файлы
                 try:
                     os.remove(word_path)
                     os.remove(excel_path)
                 except Exception as e:
                     logging.warning(f"Не удалось удалить временные файлы: {e}")
             
-            user_states[user_id] = {"mode": "main_menu"}
+            user_states[user_id] = {"mode": config['states']['main_menu']}
             bot.messaging.send_message(peer, "\n🔄 Для новой проверки напишите `/start`")
             
         except Exception as e:
             logging.error(f"Ошибка при обработке свободной идеи: {e}")
-            bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при анализе: {e}")
-            user_states[user_id] = {"mode": "main_menu"}
+            bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
         return
     
-    elif state["mode"] == "search_owners":
-        bot.messaging.send_message(peer, "🔍 Ищу владельцев по вашему запросу...")
+    elif state["mode"] == config['states']['search_owners']:
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['search_owners']['responses']['searching'])
         
         try:
             owners_info = find_agent_owners(text)
             bot.messaging.send_message(peer, owners_info)
             
-            user_states[user_id] = {"mode": "main_menu"}
-            bot.messaging.send_message(peer, "\n🔄 Для нового поиска напишите `/search_owners`")
+            user_states[user_id] = {"mode": config['states']['main_menu']}
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['search_owners']['responses']['new_search'])
             
         except Exception as e:
             logging.error(f"Ошибка при поиске владельцев: {e}")
-            bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при поиске: {e}")
-            user_states[user_id] = {"mode": "main_menu"}
+            bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    elif state["mode"] == "help_with_ideas":
-        bot.messaging.send_message(peer, "🧠 Генерирую идеи для вас...")
+    elif state["mode"] == config['states']['help_with_ideas']:
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['generating'])
         
         try:
             ideas_response = generate_idea_suggestions(text)
-            bot.messaging.send_message(peer, f"💡 **Идеи для AI-агентов:**\n\n{ideas_response}")
-            bot.messaging.send_message(peer, 
-                "\n🔹 Понравилась какая-то идея? Напишите `/idea` чтобы детально её проработать!")
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['result'].format(ideas=ideas_response))
+            bot.messaging.send_message(peer, "\n🔹 Понравилась какая-то идея? Напишите `/idea` чтобы детально её проработать!")
             
-            user_states[user_id] = {"mode": "main_menu"}
+            user_states[user_id] = {"mode": config['states']['main_menu']}
             
         except Exception as e:
             logging.error(f"Ошибка при генерации идей: {e}")
-            bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при генерации идей: {e}")
-            user_states[user_id] = {"mode": "main_menu"}
+            bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
     # Обработка общих сообщений
     try:
         if text.startswith('/'):
             command = text[1:].lower()
+            cmd_config = config['bot_settings']['commands']
+            
             if command == "start":
                 start_handler(update)
             elif command == "idea":
@@ -509,11 +376,10 @@ def text_handler(update: UpdateMessage, widget=None):
             elif command == "help":
                 help_handler(update)
             else:
-                bot.messaging.send_message(peer, "❌ Неизвестная команда. Напишите `/start` для просмотра доступных команд.")
+                bot.messaging.send_message(peer, config['error_messages']['unknown_command'])
             return
         
         gpt_response, is_maybe_idea, command = check_general_message_with_gigachat(text)
-        
         logging.info(f"🔎 Ответ GigaChat: {gpt_response}, Идея: {is_maybe_idea}, CMD: {command}")
 
         if command:
@@ -532,36 +398,34 @@ def text_handler(update: UpdateMessage, widget=None):
             elif command == "consultation":
                 consultation_handler(update)
             else:
-                bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз или напишите `/start`")
+                bot.messaging.send_message(peer, gpt_response or config['error_messages']['not_understood'])
         elif is_maybe_idea:
-            # Если GigaChat определил, что это идея, предлагаем её обработать
             bot.messaging.send_message(peer, f"{gpt_response}\n\n💡 Хотите проверить эту идею на уникальность? Напишите `/idea`")
         else:
-            bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз или напишите `/start`")
+            bot.messaging.send_message(peer, gpt_response or config['error_messages']['not_understood'])
     
     except Exception as e:
         logging.error(f"Ошибка в text_handler: {e}")
-        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка: {e}")
+        bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
 
 def main():
     global bot
     bot = DialogBot.create_bot({
-        "endpoint": "epbotsift.sberchat.sberbank.ru",
+        "endpoint": config['bot_settings']['endpoint'],
         "token": BOT_TOKEN,
-        "is_secure": True,
+        "is_secure": config['bot_settings']['is_secure'],
     })
 
-    bot.messaging.command_handler([
-        CommandHandler(start_handler, "start"),
-        CommandHandler(idea_handler, "idea"),
-        CommandHandler(agent_handler, "ai_agent"),
-        CommandHandler(search_owners_handler, "search_owners"),
-        CommandHandler(search_owners_handler, "group"),
-        CommandHandler(help_idea_handler, "help_idea"),
-        CommandHandler(consultation_handler, "consultation"),
-        CommandHandler(help_handler, "help"),
-    ])
-
+    # Регистрация команд из конфига
+    handlers = []
+    for cmd, cmd_data in config['bot_settings']['commands'].items():
+        handler_func = globals()[cmd_data['handler']]
+        handlers.append(CommandHandler(handler_func, cmd))
+        if 'aliases' in cmd_data:
+            for alias in cmd_data['aliases']:
+                handlers.append(CommandHandler(handler_func, alias))
+    
+    bot.messaging.command_handler(handlers)
     bot.messaging.message_handler([
         MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)
     ])
