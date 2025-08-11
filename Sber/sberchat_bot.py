@@ -12,6 +12,7 @@ from ai_agent import (
     generate_agents_summary_file,
     find_agent_owners,
     generate_idea_suggestions,
+    calculate_work_cost,  # Новая функция
 )
 
 # Загрузка переменных окружения
@@ -46,18 +47,51 @@ def send_file_sync(
     forward: list = None,
     interactive_media_groups: list = None,
 ):
-    return bot_instance.messaging.send_filewrapped(
-        peer,
-        file,
-        uid,
-        text,
-        name,
-        verify,
-        is_forward_ban,
-        reply,
-        forward,
-        interactive_media_groups
-    )
+    """Синхронная отправка файла в чат"""
+    try:
+        logging.info(f"🔄 Отправляем файл: {name}")
+        
+        # Проверяем, что файл существует и не пустой
+        if hasattr(file, 'name') and os.path.exists(file.name):
+            file_size = os.path.getsize(file.name)
+            logging.info(f"📊 Размер файла: {file_size} байт")
+            
+            if file_size == 0:
+                logging.warning("⚠️ Файл пуст!")
+                return None
+        
+        # Отправляем файл через Dialog Bot SDK
+        result = bot_instance.messaging.send_file(
+            peer=peer,
+            file=file,
+            message=text,
+            file_name=name,
+        )
+        
+        logging.info(f"✅ Файл успешно отправлен: {result}")
+        return result
+        
+    except Exception as e:
+        logging.error(f"❌ Ошибка отправки файла: {e}")
+        # Пробуем альтернативный метод
+        try:
+            result = bot_instance.messaging.send_filewrapped(
+                peer,
+                file,
+                uid,
+                text,
+                name,
+                verify,
+                is_forward_ban,
+                reply,
+                forward,
+                interactive_media_groups
+            )
+            logging.info(f"✅ Файл отправлен альтернативным методом: {result}")
+            return result
+        except Exception as e2:
+            logging.error(f"❌ Ошибка альтернативной отправки: {e2}")
+            return None
 
 def start_handler(update: UpdateMessage) -> None:
     """Обработчик команды /start"""
@@ -74,6 +108,7 @@ def start_handler(update: UpdateMessage) -> None:
 💡 **У меня есть идея!** — проверю уникальность и создам техническое описание
    • Сравню с существующими агентами
    • Проанализирую на практичность
+   • Рассчитаю стоимость работы
    • Создам Word и Excel документы
 
 📊 **АИ-агенты?** — предоставлю актуальный список реализованных агентов
@@ -90,6 +125,11 @@ def start_handler(update: UpdateMessage) -> None:
    • Генерация новых идей
    • Анализ возможностей AI
    • Советы по реализации
+
+💬 **Консультация** — полезные ссылки и ресурсы
+   • Лучшие практики разработки AI-агентов
+   • Методологии и подходы
+   • Рекомендуемые инструменты
 
 📝 **Поддержка** — техническая помощь и консультации
 
@@ -136,13 +176,24 @@ def agent_handler(update: UpdateMessage) -> None:
         bot.messaging.send_message(peer, "📊 **Актуальный список AI-агентов:**\n\n"
                                          "📎 Прикладываю оригинальный файл и аналитический отчет!")
         
+        # Отправляем основной файл
         with open(agents_file_path, "rb") as f:
-            send_file_sync(bot, peer, f, name="agents.xlsx")
+            result1 = send_file_sync(bot, peer, f, name="agents.xlsx", text="📋 Основной файл с агентами")
+            if not result1:
+                bot.messaging.send_message(peer, "⚠️ Ошибка отправки основного файла")
         
+        # Отправляем аналитический файл
         if summary_file and os.path.exists(summary_file):
             with open(summary_file, "rb") as f:
-                send_file_sync(bot, peer, f, name=os.path.basename(summary_file))
-            os.remove(summary_file)
+                result2 = send_file_sync(bot, peer, f, name=os.path.basename(summary_file), text="📊 Аналитический отчет")
+                if not result2:
+                    bot.messaging.send_message(peer, "⚠️ Ошибка отправки аналитического файла")
+            
+            # Удаляем временный файл
+            try:
+                os.remove(summary_file)
+            except Exception as e:
+                logging.warning(f"Не удалось удалить временный файл: {e}")
             
     except Exception as e:
         logging.error(f"Ошибка в agent_handler: {e}")
@@ -169,7 +220,9 @@ def search_owners_handler(update: UpdateMessage) -> None:
             "- По типу процесса (документооборот, кредитование)\n\n"
             "👉 Напишите имя, название или тип:")
     except Exception as e:
-        logging.error(f"Ошибка в agent_handler: {e}")
+        logging.error(f"Ошибка в search_owners_handler: {e}")
+        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка: {e}")
+
 def help_idea_handler(update: UpdateMessage) -> None:
     """Обработчик для помощи с генерацией идей"""
     peer = update.peer
@@ -186,6 +239,52 @@ def help_idea_handler(update: UpdateMessage) -> None:
         "Или просто напишите 'предложи идеи' и я дам несколько вариантов!\n\n"
         "👉 Опишите ваш запрос:")
 
+def consultation_handler(update: UpdateMessage) -> None:
+    """Обработчик для консультации и полезных ссылок"""
+    peer = update.peer
+    user_id = peer.id
+    
+    user_states[user_id] = {"mode": "main_menu"}
+    
+    bot.messaging.send_message(peer, """
+💬 **Консультация и полезные ресурсы**
+
+📚 **Методологии и подходы:**
+• Design Thinking для AI - https://www.designthinking.org/ai
+• Agile разработка AI-систем - https://agilealliance.org/ai
+• Lean AI - методология быстрой разработки
+
+🛠️ **Инструменты разработки:**
+• Langchain - https://langchain.com - фреймворк для LLM
+• AutoGen - https://github.com/microsoft/autogen - мульти-агентные системы
+• CrewAI - https://crewai.com - командные AI-агенты
+
+📊 **Лучшие практики:**
+• MLOps для AI-агентов - https://mlops.org
+• AI Ethics Guidelines - принципы этичного ИИ
+• Prompt Engineering - искусство создания промптов
+
+🎓 **Обучение и сертификация:**
+• Coursera AI for Everyone - базовый курс по ИИ
+• edX Machine Learning - углубленное изучение ML
+• Kaggle Learn - бесплатные микро-курсы
+
+💡 **Идеи для вдохновения:**
+• OpenAI Cookbook - примеры использования GPT
+• Hugging Face - модели и датасеты
+• Papers with Code - научные статьи с кодом
+
+🤝 **Сообщества:**
+• AI/ML Telegram каналы
+• GitHub AI проекты
+• Reddit r/MachineLearning
+
+**💬 Нужна персональная консультация?**
+Опишите свою задачу, и я дам конкретные рекомендации!
+
+🔄 Для возврата в главное меню напишите `/start`
+""")
+
 def help_handler(update: UpdateMessage) -> None:
     """Обработчик команды помощи"""
     bot.messaging.send_message(update.peer, """
@@ -196,10 +295,12 @@ def help_handler(update: UpdateMessage) -> None:
 
 🤖 **Возможности бота:**
 • Проверка уникальности идей для AI-агентов
+• Расчет стоимости разработки
 • Получение списка существующих агентов
 • Поиск владельцев и контактов
 • Генерация файлов с описанием инициатив
 • Помощь в разработке новых идей
+• Консультации и полезные ссылки
 
 💡 **Как пользоваться:**
 Просто опишите свою идею или воспользуйтесь командами в главном меню.
@@ -224,27 +325,43 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
         bot.messaging.send_message(peer, f"📝 **{field_name}**\n\nОпишите этот аспект вашей инициативы:")
         state["current_field"] += 1
     else:
-        bot.messaging.send_message(peer, "✅ Отлично! Все поля заполнены. Проверяю уникальность идеи...")
+        bot.messaging.send_message(peer, "✅ Отлично! Все поля заполнены. Проверяю уникальность идеи и рассчитываю стоимость...")
         
         try:
+            # Проверяем идею и получаем стоимость
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
                 text, state["idea_data"], is_free_form=False
             )
             
-            bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}")
+            # Рассчитываем стоимость
+            cost_info = calculate_work_cost(state["idea_data"], is_unique)
+            
+            # Отправляем результат анализа
+            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n💰 **Оценка стоимости:**\n{cost_info}"
+            bot.messaging.send_message(peer, full_response)
             
             if state["idea_data"]:
-                word_path, excel_path = generate_files(state["idea_data"])
+                word_path, excel_path = generate_files(state["idea_data"], cost_info)
                 bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
                 
+                # Отправляем Word файл
                 with open(word_path, "rb") as f_docx:
-                    send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path))
+                    result1 = send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path), text="📄 Техническое описание")
+                    if not result1:
+                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Word файла")
                 
+                # Отправляем Excel файл
                 with open(excel_path, "rb") as f_xlsx:
-                    send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path))
+                    result2 = send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path), text="📊 Структурированные данные")
+                    if not result2:
+                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Excel файла")
                 
-                os.remove(word_path)
-                os.remove(excel_path)
+                # Удаляем временные файлы
+                try:
+                    os.remove(word_path)
+                    os.remove(excel_path)
+                except Exception as e:
+                    logging.warning(f"Не удалось удалить временные файлы: {e}")
             
             user_states[user_id] = {"mode": "main_menu"}
             bot.messaging.send_message(peer, "\n🔄 Для новой проверки напишите `/start`")
@@ -294,7 +411,7 @@ def text_handler(update: UpdateMessage, widget=None):
         return
     
     elif state["mode"] == "idea_free_form":
-        bot.messaging.send_message(peer, "💡 Анализирую вашу идею...")
+        bot.messaging.send_message(peer, "💡 Анализирую вашу идею и рассчитываю стоимость...")
         
         try:
             user_data = {"Описание в свободной форме": text}
@@ -302,20 +419,34 @@ def text_handler(update: UpdateMessage, widget=None):
                 text, user_data, is_free_form=True
             )
             
-            bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}")
+            # Рассчитываем стоимость
+            cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
+            
+            # Отправляем результат
+            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n💰 **Оценка стоимости:**\n{cost_info}"
+            bot.messaging.send_message(peer, full_response)
             
             if parsed_data:
-                word_path, excel_path = generate_files(parsed_data)
+                word_path, excel_path = generate_files(parsed_data, cost_info)
                 bot.messaging.send_message(peer, "📎 Прикладываю файлы с вашей инициативой:")
                 
+                # Отправляем файлы
                 with open(word_path, "rb") as f_docx:
-                    send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path))
+                    result1 = send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path), text="📄 Техническое описание")
+                    if not result1:
+                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Word файла")
                 
                 with open(excel_path, "rb") as f_xlsx:
-                    send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path))
+                    result2 = send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path), text="📊 Структурированные данные")
+                    if not result2:
+                        bot.messaging.send_message(peer, "⚠️ Ошибка отправки Excel файла")
                 
-                os.remove(word_path)
-                os.remove(excel_path)
+                # Удаляем временные файлы
+                try:
+                    os.remove(word_path)
+                    os.remove(excel_path)
+                except Exception as e:
+                    logging.warning(f"Не удалось удалить временные файлы: {e}")
             
             user_states[user_id] = {"mode": "main_menu"}
             bot.messaging.send_message(peer, "\n🔄 Для новой проверки напишите `/start`")
@@ -373,15 +504,17 @@ def text_handler(update: UpdateMessage, widget=None):
                 search_owners_handler(update)
             elif command == "help_idea":
                 help_idea_handler(update)
+            elif command == "consultation":
+                consultation_handler(update)
             elif command == "help":
                 help_handler(update)
             else:
                 bot.messaging.send_message(peer, "❌ Неизвестная команда. Напишите `/start` для просмотра доступных команд.")
             return
         
-        gpt_response, command = check_general_message_with_gigachat(text)
+        gpt_response, is_maybe_idea, command = check_general_message_with_gigachat(text)
         
-        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}")
+        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, Идея: {is_maybe_idea}, CMD: {command}")
 
         if command:
             if command == "help":
@@ -396,8 +529,13 @@ def text_handler(update: UpdateMessage, widget=None):
                 idea_handler(update)
             elif command == "help_idea":
                 help_idea_handler(update)
+            elif command == "consultation":
+                consultation_handler(update)
             else:
                 bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз или напишите `/start`")
+        elif is_maybe_idea:
+            # Если GigaChat определил, что это идея, предлагаем её обработать
+            bot.messaging.send_message(peer, f"{gpt_response}\n\n💡 Хотите проверить эту идею на уникальность? Напишите `/idea`")
         else:
             bot.messaging.send_message(peer, gpt_response or "🤖 Я вас не понял. Попробуйте ещё раз или напишите `/start`")
     
@@ -420,6 +558,7 @@ def main():
         CommandHandler(search_owners_handler, "search_owners"),
         CommandHandler(search_owners_handler, "group"),
         CommandHandler(help_idea_handler, "help_idea"),
+        CommandHandler(consultation_handler, "consultation"),
         CommandHandler(help_handler, "help"),
     ])
 
