@@ -229,6 +229,13 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
                     if match:
                         parsed_data[field] = match.group(1).strip()
                         break
+                if is_unique and parsed_data:
+                    try:
+                        cost = calculate_work_cost(parsed_data)
+                        response_text += f"\n\n💰 Примерная стоимость работы: {cost:,.0f} ₽"
+                    except Exception as e:
+                        logging.error(f"Ошибка при расчете стоимости: {e}")
+
 
         suggest_processing = "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower()
 
@@ -631,3 +638,25 @@ def generate_files(data: dict) -> tuple[str, str]:
     wb.save(excel_path)
 
     return word_path, excel_path
+
+def calculate_work_cost(parsed_data: dict) -> float:
+    """
+    Расчет примерной стоимости работы по инициативе.
+    Логика: умножаем коэффициент масштаба на базовую ставку.
+    """
+    base_rate = 1000  # базовая ставка в рублях
+    scale_map = {
+        "малый": 1,
+        "средний": 2,
+        "большой": 3,
+        "глобальный": 5
+    }
+
+    scale_value = parsed_data.get("Масштаб процесса", "").strip().lower()
+    if scale_value.isdigit():
+        coefficient = int(scale_value)
+    else:
+        coefficient = scale_map.get(scale_value, 1)  # по умолчанию 1
+
+    cost = base_rate * coefficient
+    return cost
