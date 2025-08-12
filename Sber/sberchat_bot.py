@@ -5,6 +5,10 @@ from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
+from dialog_bot_sdk.entities.messaging import UpdateMessage
+
+from openpyxl import load_workbook
+
 
 from ai_agent import (
     check_general_message_with_gigachat,
