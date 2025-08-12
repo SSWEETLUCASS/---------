@@ -9,8 +9,6 @@ from dialog_bot_sdk.entities.messaging import UpdateMessage
 
 from openpyxl import load_workbook, Workbook
 
-
-
 from ai_agent import (
     check_general_message_with_gigachat,
     check_idea_with_gigachat_local,
@@ -45,36 +43,31 @@ logging.basicConfig(
 user_states = {}
 bot = None
 
-def send_file_sync(
-    bot_instance,
-    peer,
-    file,
-    text: str = None,
-    uid: int = None,
-    name: str = None,
-    verify: bool = None,
-    is_forward_ban: bool = False,
-    reply: list = None,
-    forward: list = None,
-    interactive_media_groups: list = None,
-):
-    """Синхронная отправка файла в чат"""
+def send_file_sync(peer, file_path, text=None, name=None):
+    """Синхронная отправка файла в чат через правильный API"""
     try:
-        logging.info(f"🔄 Отправляем файл: {name}")
+        logging.info(f"🔄 Отправляем файл: {name or file_path}")
         
-        if hasattr(file, 'name') and os.path.exists(file.name):
-            file_size = os.path.getsize(file.name)
+        # Проверяем размер файла
+        if os.path.exists(file_path):
+            file_size = os.path.getsize(file_path)
             logging.info(f"📊 Размер файла: {file_size} байт")
             
             if file_size == 0:
                 logging.warning("⚠️ Файл пуст!")
                 return None
         
-        result = bot_instance.messaging.send_file(
+        # Читаем файл в байты
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+        
+        # Используем правильный метод отправки
+        result = bot.messaging.send_file_sync(
             peer=peer,
-            file=file,
-            message=text,
-            file_name=name,
+            file=file_bytes,
+            text=text,
+            name=name or os.path.basename(file_path),
+            is_forward_ban=True
         )
         
         logging.info(f"✅ Файл успешно отправлен: {result}")
@@ -82,24 +75,7 @@ def send_file_sync(
         
     except Exception as e:
         logging.error(f"❌ Ошибка отправки файла: {e}")
-        try:
-            result = bot_instance.messaging.send_filewrapped(
-                peer,
-                file,
-                uid,
-                text,
-                name,
-                verify,
-                is_forward_ban,
-                reply,
-                forward,
-                interactive_media_groups
-            )
-            logging.info(f"✅ Файл отправлен альтернативным методом: {result}")
-            return result
-        except Exception as e2:
-            logging.error(f"❌ Ошибка альтернативной отправки: {e2}")
-            return None
+        return None
 
 def start_handler(update: UpdateMessage) -> None:
     """Обработчик команды /start"""
@@ -140,17 +116,18 @@ def agent_handler(update: UpdateMessage) -> None:
         
         bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['initial'])
         
-        with open(agents_file_path, "rb") as f:
-            result1 = send_file_sync(bot, peer, f, name="agents.xlsx", text="📋 Основной файл с агентами")
-            if not result1:
-                bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="основной"))
+        # Отправляем основной файл
+        result1 = send_file_sync(peer, agents_file_path, text="📋 Основной файл с агентами", name="agents.xlsx")
+        if not result1:
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="основной"))
         
+        # Отправляем аналитический файл если он создан
         if summary_file and os.path.exists(summary_file):
-            with open(summary_file, "rb") as f:
-                result2 = send_file_sync(bot, peer, f, name=os.path.basename(summary_file), text="📊 Аналитический отчет")
-                if not result2:
-                    bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
+            result2 = send_file_sync(peer, summary_file, text="📊 Аналитический отчет", name=os.path.basename(summary_file))
+            if not result2:
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
             
+            # Удаляем временный файл
             try:
                 os.remove(summary_file)
             except Exception as e:
@@ -245,6 +222,9 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
         
         try:
+            # Добавляем user_id в данные для отслеживания истории
+            state["idea_data"]["user_id"] = user_id
+            
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
                 text, state["idea_data"], is_free_form=False
             )
@@ -257,16 +237,17 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
                 word_path, excel_path = generate_files(state["idea_data"], cost_info)
                 bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
                 
-                with open(word_path, "rb") as f_docx:
-                    result1 = send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path), text="📄 Техническое описание")
-                    if not result1:
-                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
+                # Отправляем Word файл
+                result1 = send_file_sync(peer, word_path, text="📄 Техническое описание", name=os.path.basename(word_path))
+                if not result1:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
                 
-                with open(excel_path, "rb") as f_xlsx:
-                    result2 = send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path), text="📊 Структурированные данные")
-                    if not result2:
-                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
+                # Отправляем Excel файл
+                result2 = send_file_sync(peer, excel_path, text="📊 Структурированные данные", name=os.path.basename(excel_path))
+                if not result2:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
                 
+                # Удаляем временные файлы
                 try:
                     os.remove(word_path)
                     os.remove(excel_path)
@@ -317,7 +298,7 @@ def text_handler(update: UpdateMessage, widget=None):
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
         
         try:
-            user_data = {"Описание в свободной форме": text}
+            user_data = {"Описание в свободной форме": text, "user_id": user_id}
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
                 text, user_data, is_free_form=True
             )
@@ -330,16 +311,17 @@ def text_handler(update: UpdateMessage, widget=None):
                 word_path, excel_path = generate_files(parsed_data, cost_info)
                 bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
                 
-                with open(word_path, "rb") as f_docx:
-                    result1 = send_file_sync(bot, peer, f_docx, name=os.path.basename(word_path), text="📄 Техническое описание")
-                    if not result1:
-                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
+                # Отправляем Word файл
+                result1 = send_file_sync(peer, word_path, text="📄 Техническое описание", name=os.path.basename(word_path))
+                if not result1:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
                 
-                with open(excel_path, "rb") as f_xlsx:
-                    result2 = send_file_sync(bot, peer, f_xlsx, name=os.path.basename(excel_path), text="📊 Структурированные данные")
-                    if not result2:
-                        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
+                # Отправляем Excel файл
+                result2 = send_file_sync(peer, excel_path, text="📊 Структурированные данные", name=os.path.basename(excel_path))
+                if not result2:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
                 
+                # Удаляем временные файлы
                 try:
                     os.remove(word_path)
                     os.remove(excel_path)
@@ -411,7 +393,8 @@ def text_handler(update: UpdateMessage, widget=None):
                 bot.messaging.send_message(peer, config['error_messages']['unknown_command'])
             return
         
-        gpt_response, command = check_general_message_with_gigachat(text)
+        # Используем правильную сигнатуру функции из второго файла
+        gpt_response, command = check_general_message_with_gigachat(text, user_id)
         logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}")
 
         if command:
