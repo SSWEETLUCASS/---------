@@ -369,53 +369,60 @@ def text_handler(update: UpdateMessage, widget=None):
             user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    # Обработка общих сообщений
-    try:
-        if text.startswith('/'):
-            command = text[1:].lower()
-            cmd_config = config['bot_settings']['commands']
-            
-            if command == "start":
-                start_handler(update)
-            elif command == "idea":
-                idea_handler(update)
-            elif command == "ai_agent":
-                agent_handler(update)
-            elif command in ["group", "search_owners"]:
-                search_owners_handler(update)
-            elif command == "help_idea":
-                help_idea_handler(update)
-            elif command == "consultation":
-                consultation_handler(update)
-            elif command == "help":
-                help_handler(update)
-            else:
-                bot.messaging.send_message(peer, config['error_messages']['unknown_command'])
-            return
+    # Обработка команд
+    if text.startswith('/'):
+        command = text[1:].lower()
         
-        # Используем правильную сигнатуру функции из второго файла
-        gpt_response, command = check_general_message_with_gigachat(text, user_id)
-        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}")
-
-        if command:
-            if command == "help":
-                help_handler(update)
-            elif command == "start":
-                start_handler(update)
-            elif command == "ai_agent":
-                agent_handler(update)
-            elif command == "search_owners":
-                search_owners_handler(update)
-            elif command == "idea":
-                idea_handler(update)
-            elif command == "help_idea":
-                help_idea_handler(update)
-            elif command == "consultation":
-                consultation_handler(update)
-            else:
-                bot.messaging.send_message(peer, gpt_response or config['error_messages']['not_understood'])
+        if command == "start":
+            start_handler(update)
+        elif command == "idea":
+            idea_handler(update)
+        elif command == "ai_agent":
+            agent_handler(update)
+        elif command in ["group", "search_owners"]:
+            search_owners_handler(update)
+        elif command == "help_idea":
+            help_idea_handler(update)
+        elif command == "consultation":
+            consultation_handler(update)
+        elif command == "help":
+            help_handler(update)
         else:
-            bot.messaging.send_message(peer, gpt_response or config['error_messages']['not_understood'])
+            bot.messaging.send_message(peer, config['error_messages']['unknown_command'])
+        return
+    
+    # Обработка обычных сообщений через GigaChat
+    try:
+        gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
+        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, Обнаружена команда: {detected_command}")
+
+        # Если GigaChat обнаружил намерение выполнить команду
+        if detected_command:
+            # Сначала отправляем ответ от GigaChat
+            if gpt_response and gpt_response.strip():
+                bot.messaging.send_message(peer, gpt_response)
+            
+            # Затем выполняем соответствующую команду
+            if detected_command == "start":
+                start_handler(update)
+            elif detected_command == "ai_agent":
+                agent_handler(update)
+            elif detected_command == "search_owners":
+                search_owners_handler(update)
+            elif detected_command == "idea":
+                idea_handler(update)
+            elif detected_command == "help_idea":
+                help_idea_handler(update)
+            elif detected_command == "consultation":
+                consultation_handler(update)
+            elif detected_command == "help":
+                help_handler(update)
+        else:
+            # Просто ведем обычный диалог
+            if gpt_response and gpt_response.strip():
+                bot.messaging.send_message(peer, gpt_response)
+            else:
+                bot.messaging.send_message(peer, config['error_messages']['not_understood'])
     
     except Exception as e:
         logging.error(f"Ошибка в text_handler: {e}")

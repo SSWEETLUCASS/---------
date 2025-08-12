@@ -245,33 +245,44 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, {}, False
 
 def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[str, str | None]:
-    """Проверка общего сообщения с помощью GigaChat"""
+    """Проверка общего сообщения с помощью GigaChat для естественного диалога"""
     try:
+        # Получаем историю предыдущих сообщений пользователя для контекста
+        user_history = ""
+        if user_id and user_id in gigachat_memory:
+            recent_messages = list(gigachat_memory[user_id])[-3:]  # Последние 3 сообщения
+            if recent_messages:
+                user_history = "Контекст предыдущих сообщений:\n" + "\n".join([
+                    f"Пользователь: {msg_data['input'][:100]}...\nОтвет: {msg_data['output'][:100]}..." 
+                    for msg_data in recent_messages
+                ]) + "\n\n"
+
         prompt = f"""
-        Пользователь написал:
+        {user_history}Текущее сообщение пользователя:
         \"\"\"{msg}\"\"\"
 
-        Проанализируй сообщение и определи:
-        
-        1. Это приветствие или начальное общение? (привет, здравствуй, начнем, что умеешь и т.д.)
-           Если да, то: CMD:start
-        
-        2. Содержит ли сообщение описание идеи для AI-агента?
-           Если да, ответь: "Похоже, вы описали идею для AI-агента...": 
-        
-        3. Просит ли пользователь помощь с генерацией или развитием идеи? 
-           (помоги с идеей, предложи идею, что можно автоматизировать и т.д.)
-           Если да, то: CMD:help_idea
-        
-        4. Если произошла проблема или что-то подобное с чат-ботом, то CMD: help 
+        Ты - помощник по AI-агентам. Веди естественный дружелюбный диалог.
 
-        5. Если хочет узнать про аи-агента(описание его полностью или отдельная часть), то CMD:ai_agent
+        Анализируй сообщение и:
 
-        6. Если пользователь хочет консультацию → CMD:consultation
-        
-        5. Если ничего из выше перечисленного не подходит, дай полезный ответ по смыслу.
+        1. Если это явный запрос на конкретное действие, выдай соответствующую команду:
+           - Приветствие, знакомство → CMD:start
+           - Хочет узнать про AI-агентов, посмотреть список → CMD:ai_agent  
+           - Ищет конкретного агента или владельца → CMD:search_owners
+           - Хочет проверить свою идею → CMD:idea
+           - Просит помочь с генерацией идей → CMD:help_idea
+           - Нужна консультация или ссылки → CMD:consultation
+           - Проблемы с ботом → CMD:help
 
-        Отвечай ТОЛЬКО на русском языке, без дополнительной технической информации 1 сообщением.
+        2. Если это обычное общение - веди диалог как дружелюбный помощник:
+           - Отвечай на вопросы
+           - Предлагай помощь
+           - Интересуйся потребностями пользователя
+           - Рассказывай про свои возможности
+
+        3. В ответе НЕ дублируй информацию - либо команда, либо диалог.
+
+        Отвечай живо и по-человечески, как настоящий консультант по AI.
         """
 
         logging.info(f"[GigaChat Input] {prompt}")
@@ -280,11 +291,11 @@ def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[
 
         response = clean_response_text(raw_response)
 
-        # Сохраняем в память для пользователя (если user_id известен)
+        # Сохраняем в память для пользователя
         if user_id:
             gigachat_memory[user_id].append({
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "input": prompt.strip(),
+                "input": msg.strip(),
                 "output": response.strip()
             })
 
@@ -293,13 +304,13 @@ def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[
         command = command_match.group(1) if command_match else None
 
         # Убираем команду из текста ответа
-        clean_text = re.sub(r"CMD:\w+\s*", "", response).strip()
+        clean_text = re.sub(r"CMD:\w+\s*[•\-]*\s*", "", response).strip()
         
         return clean_text, command
 
     except Exception as e:
         return f"⚠️ Ошибка при обращении к GigaChat: {e}", None
-
+    
 def generate_idea_suggestions(query: str = "") -> str:
     """Генерация предложений идей для AI-агентов"""
     try:
