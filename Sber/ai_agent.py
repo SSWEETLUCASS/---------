@@ -244,7 +244,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
     except Exception as e:
         return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, {}, False
 
-def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[str, bool, str | None]:
+def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[str, str | None]:
     """Проверка общего сообщения с помощью GigaChat"""
     try:
         prompt = f"""
@@ -298,8 +298,7 @@ def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[
         return clean_text, command
 
     except Exception as e:
-        return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, None
-
+        return f"⚠️ Ошибка при обращении к GigaChat: {e}", None
 
 def generate_idea_suggestions(query: str = "") -> str:
     """Генерация предложений идей для AI-агентов"""
@@ -631,24 +630,55 @@ def generate_files(data: dict) -> tuple[str, str]:
 
     return word_path, excel_path
 
-def calculate_work_cost(parsed_data: dict) -> float:
+def calculate_work_cost(parsed_data: dict, is_unique: bool = True) -> str:
     """
     Расчет примерной стоимости работы по инициативе.
     Логика: умножаем коэффициент масштаба на базовую ставку.
     """
-    base_rate = 1000  # базовая ставка в рублях
+    base_rate = 50000  # базовая ставка в рублях
     scale_map = {
         "малый": 1,
         "средний": 2,
         "большой": 3,
+        "крупный": 4,
         "глобальный": 5
     }
 
+    # Получаем масштаб из данных
     scale_value = parsed_data.get("Масштаб процесса", "").strip().lower()
+    
+    # Если это число, используем его
     if scale_value.isdigit():
         coefficient = int(scale_value)
     else:
-        coefficient = scale_map.get(scale_value, 1)  # по умолчанию 1
-
+        # Ищем ключевые слова в описании масштаба
+        coefficient = 1  # по умолчанию
+        for key, value in scale_map.items():
+            if key in scale_value:
+                coefficient = value
+                break
+    
+    # Если идея не уникальна, снижаем стоимость
+    if not is_unique:
+        coefficient = max(1, coefficient - 1)
+    
     cost = base_rate * coefficient
-    return cost
+    
+    # Формируем описание стоимости
+    cost_description = f"""
+🔢 **Расчет стоимости разработки:**
+
+• Базовая ставка: {base_rate:,} ₽
+• Коэффициент сложности: {coefficient}x
+• Уникальность идеи: {'Да' if is_unique else 'Нет (похожие решения существуют)'}
+
+💰 **Итоговая стоимость: {cost:,} ₽**
+
+📊 Стоимость может варьироваться в зависимости от:
+- Сложности интеграций
+- Требований к производительности  
+- Объема тестирования
+- Дополнительных функций
+"""
+    
+    return cost_description

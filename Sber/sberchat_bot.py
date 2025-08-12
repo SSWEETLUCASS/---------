@@ -230,7 +230,7 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
             )
             
             cost_info = calculate_work_cost(state["idea_data"], is_unique)
-            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n💰 **Оценка стоимости:**\n{cost_info}"
+            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}"
             bot.messaging.send_message(peer, full_response)
             
             if state["idea_data"]:
@@ -304,7 +304,7 @@ def text_handler(update: UpdateMessage, widget=None):
             )
             
             cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
-            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n💰 **Оценка стоимости:**\n{cost_info}"
+            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}"
             bot.messaging.send_message(peer, full_response)
             
             if parsed_data:
