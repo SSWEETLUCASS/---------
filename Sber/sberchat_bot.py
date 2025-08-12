@@ -157,18 +157,46 @@ def agent_handler(update: UpdateMessage) -> None:
         bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error=e))
 
 def search_owners_handler(update: UpdateMessage) -> None:
-    """Обработчик для поиска владельцев агентов"""
+    """Обработчик для поиска владельцев агентов по локальному файлу agents.xlsx"""
     peer = update.peer
     user_id = peer.id
-    
+
     try:
         agents_file_path = config['file_settings']['agents_file']
+
+        # Проверка наличия файла
         if not os.path.exists(agents_file_path):
             bot.messaging.send_message(peer, config['error_messages']['file_not_found'])
             return
-        
-        user_states[user_id] = {"mode": config['states']['search_owners']}
-        bot.messaging.send_message(peer, config['bot_settings']['commands']['search_owners']['responses']['initial'])
+
+        # Загружаем Excel
+        wb = load_workbook(agents_file_path)
+        sheet = wb.active
+
+        # Читаем заголовки
+        headers = [cell.value for cell in sheet[1]]
+
+        # Читаем строки в список словарей
+        agents_data = []
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            row_dict = dict(zip(headers, row))
+            agents_data.append(row_dict)
+
+        # Сохраняем состояние пользователя
+        user_states[user_id] = {
+            "mode": config['states']['search_owners'],
+            "agents_data": agents_data
+        }
+
+        # Сообщаем пользователю, что данные загружены
+        bot.messaging.send_message(
+            peer,
+            f"Файл {os.path.basename(agents_file_path)} успешно загружен.\n"
+            "Напишите, какую информацию хотите получить:\n"
+            "• all — показать весь список\n"
+            "• <имя агента> — поиск по имени"
+        )
+
     except Exception as e:
         logging.error(f"Ошибка в search_owners_handler: {e}")
         bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
