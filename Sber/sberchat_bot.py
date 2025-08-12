@@ -411,8 +411,8 @@ def text_handler(update: UpdateMessage, widget=None):
                 bot.messaging.send_message(peer, config['error_messages']['unknown_command'])
             return
         
-        gpt_response, is_maybe_idea, command = check_general_message_with_gigachat(text)
-        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, Идея: {is_maybe_idea}, CMD: {command}")
+        gpt_response, command = check_general_message_with_gigachat(text)
+        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, CMD: {command}")
 
         if command:
             if command == "help":
@@ -431,8 +431,6 @@ def text_handler(update: UpdateMessage, widget=None):
                 consultation_handler(update)
             else:
                 bot.messaging.send_message(peer, gpt_response or config['error_messages']['not_understood'])
-        elif is_maybe_idea:
-            bot.messaging.send_message(peer, f"{gpt_response}\n\n💡 Хотите проверить эту идею на уникальность? Напишите `/idea`")
         else:
             bot.messaging.send_message(peer, gpt_response or config['error_messages']['not_understood'])
     

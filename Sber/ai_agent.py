@@ -291,17 +291,11 @@ def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[
         # Извлекаем команду
         command_match = re.search(r"CMD:(\w+)", response)
         command = command_match.group(1) if command_match else None
-        
-        # Проверяем на идею
-        is_maybe_idea = any(phrase in response.lower() for phrase in [
-            "похоже на идею", "возможно, вы описали идею", "это идея", "описали инициативу",
-            "похоже, вы описали идею для ai-агента"
-        ])
 
         # Убираем команду из текста ответа
         clean_text = re.sub(r"CMD:\w+\s*", "", response).strip()
         
-        return clean_text, is_maybe_idea, command
+        return clean_text, command
 
     except Exception as e:
         return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, None
