@@ -7,7 +7,8 @@ from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
 from dialog_bot_sdk.entities.messaging import MessageHandler, CommandHandler
 from dialog_bot_sdk.entities.messaging import UpdateMessage
 
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
+
 
 
 from ai_agent import (
@@ -130,7 +131,6 @@ def agent_handler(update: UpdateMessage) -> None:
         agents_file_path = config['file_settings']['agents_file']
         if not os.path.exists(agents_file_path):
             bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_not_found'])
-            from openpyxl import Workbook
             wb = Workbook()
             ws = wb.active
             ws.append(["Блок", "ССП", "Владелец", "Контакт", "Название", "Краткое название", "Описание", "Тип"])
