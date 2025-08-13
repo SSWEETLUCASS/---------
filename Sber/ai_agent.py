@@ -11,10 +11,7 @@ from docx.shared import RGBColor
 from gigachat_wrapper import get_llm
 
 import logging
-import json
 from collections import defaultdict, deque
-import matplotlib.pyplot as plt
-import numpy as np
 
 # Настройка логирования
 logging.basicConfig(
@@ -27,6 +24,7 @@ logging.basicConfig(
 )
 
 gigachat_memory = defaultdict(lambda: deque(maxlen=10))  # user_id -> deque([...])
+
 
 def clean_response_text(text: str) -> str:
     """Улучшенная очистка текста ответа от служебных символов и кодировок"""
@@ -50,15 +48,13 @@ def clean_response_text(text: str) -> str:
     text = re.sub(r"\s*id=.*$", "", text, flags=re.DOTALL)
     text = re.sub(r"\s*usage_metadata=.*$", "", text, flags=re.DOTALL)
     
-    # Убираем служебные JSON команды
-    text = re.sub(r'ACTION:\s*\{[^}]+\}', '', text)
-    
     # Декодируем UTF-8 если нужно
     try:
         if isinstance(text, bytes):
             text = text.decode('utf-8')
         
         # Исправляем поврежденную кодировку (как в примере ÐÐ¾ÑÐ¾Ð¶Ðµ)
+        # Пробуем декодировать как latin-1 и перекодировать в UTF-8
         try:
             if 'Ð' in text or 'Ñ' in text:
                 text = text.encode('latin-1').decode('utf-8')
@@ -77,8 +73,13 @@ def clean_response_text(text: str) -> str:
     # Удаляем лишние слеши
     text = re.sub(r'\\(?![nrt"\'])', '', text)
     
+    # Очищаем от служебных команд в начале
+    text = re.sub(r'^CMD:\w+\s*[•\-]*\s*', '', text)
+    
     # Обработка -- и ##
+    # Заменяем двойные дефисы на тире (с пробелами по краям)
     text = re.sub(r'\s*--\s*', ' – ', text)
+    # Заменяем ## на подзаголовки (убираем символы и делаем новую строку)
     text = re.sub(r'\s*##\s*', '\n\n', text)
     
     # Убираем лишние символы и форматирование
@@ -118,217 +119,8 @@ def load_agents_data() -> list[dict]:
         print(f"⚠️ Ошибка при загрузке agents.xlsx: {e}")
         return []
 
-def create_agent_utility_chart(agents_data: list[dict]) -> str:
-    """Создание диаграммы полезности агентов"""
-    try:
-        if not agents_data:
-            return None
-            
-        # Анализируем агентов с помощью GigaChat
-        prompt = f"""
-        Проанализируй следующих AI-агентов и оцени их по критериям полезности от 1 до 10:
-
-        {chr(10).join([f"- {agent['name']}: {agent['description']}" for agent in agents_data[:10]])}
-        
-        Для каждого агента дай оценку по критериям:
-        1. Экономия времени (1-10)
-        2. Качество результата (1-10)  
-        3. Простота внедрения (1-10)
-        4. Масштабируемость (1-10)
-        5. ROI потенциал (1-10)
-        
-        Ответь СТРОГО в формате:
-        Название агента|оценка1|оценка2|оценка3|оценка4|оценка5
-        
-        Например:
-        Агент документооборота|8|7|6|9|8
-        """
-        
-        logging.info(f"[GigaChat Chart Input] {prompt}")
-        raw_response = get_llm().invoke(prompt)
-        logging.info(f"[GigaChat Chart Output] {raw_response}")
-        
-        response = clean_response_text(raw_response)
-        
-        # Парсим ответ
-        agent_ratings = {}
-        lines = response.split('\n')
-        
-        for line in lines:
-            if '|' in line and line.count('|') >= 5:
-                parts = line.split('|')
-                if len(parts) >= 6:
-                    name = parts[0].strip()
-                    try:
-                        ratings = [int(parts[i].strip()) for i in range(1, 6)]
-                        agent_ratings[name] = ratings
-                    except ValueError:
-                        continue
-        
-        if not agent_ratings:
-            # Fallback - создаем рандомные оценки для демонстрации
-            for agent in agents_data[:5]:
-                agent_ratings[agent['name']] = [
-                    np.random.randint(6, 10),  # Экономия времени
-                    np.random.randint(6, 9),   # Качество результата
-                    np.random.randint(4, 8),   # Простота внедрения
-                    np.random.randint(5, 9),   # Масштабируемость
-                    np.random.randint(6, 10)   # ROI потенциал
-                ]
-        
-        # Создаем диаграмму
-        fig, ax = plt.subplots(figsize=(14, 8))
-        
-        criteria = ['Экономия\nвремени', 'Качество\nрезультата', 'Простота\nвнедрения', 
-                   'Масштаби-\nруемость', 'ROI\nпотенциал']
-        
-        # Цвета для каждого критерия
-        colors = ['#2E8B57', '#4169E1', '#FF6347', '#32CD32', '#FF8C00']
-        
-        x = np.arange(len(criteria))
-        width = 0.15
-        
-        agents_list = list(agent_ratings.items())[:5]  # Топ 5 агентов
-        
-        for i, (agent_name, ratings) in enumerate(agents_list):
-            offset = width * (i - len(agents_list)/2 + 0.5)
-            bars = ax.bar(x + offset, ratings, width, 
-                         label=agent_name[:20] + ('...' if len(agent_name) > 20 else ''),
-                         alpha=0.8)
-            
-            # Добавляем значения на столбцы
-            for j, bar in enumerate(bars):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                       f'{ratings[j]}', ha='center', va='bottom', fontsize=9, fontweight='bold')
-        
-        ax.set_xlabel('Критерии оценки', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Оценка (1-10)', fontsize=12, fontweight='bold')
-        ax.set_title('Сравнительная оценка полезности AI-агентов', fontsize=14, fontweight='bold', pad=20)
-        ax.set_xticks(x)
-        ax.set_xticklabels(criteria)
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.set_ylim(0, 11)
-        ax.grid(True, alpha=0.3)
-        
-        # Улучшаем внешний вид
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        
-        plt.tight_layout()
-        
-        # Сохраняем диаграмму
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        chart_path = f"agent_utility_chart_{timestamp}.png"
-        plt.savefig(chart_path, dpi=300, bbox_inches='tight', facecolor='white')
-        plt.close()
-        
-        return chart_path
-        
-    except Exception as e:
-        logging.error(f"Ошибка при создании диаграммы: {e}")
-        return None
-
-def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[str, str | None, dict | None]:
-    """
-    Проверка общего сообщения с помощью GigaChat для естественного диалога.
-    Возвращает: (ответ_для_пользователя, предложенное_действие, контекст_данные)
-    """
-    try:
-        # Получаем историю предыдущих сообщений пользователя для контекста
-        user_history = ""
-        if user_id and user_id in gigachat_memory:
-            recent_messages = list(gigachat_memory[user_id])[-3:]  # Последние 3 сообщения
-            if recent_messages:
-                user_history = "Контекст предыдущих сообщений:\n" + "\n".join([
-                    f"Пользователь: {msg_data['input'][:100]}...\nОтвет: {msg_data['output'][:100]}..." 
-                    for msg_data in recent_messages
-                ]) + "\n\n"
-
-        prompt = f"""
-        {user_history}Текущее сообщение пользователя:
-        \"\"\"{msg}\"\"\"
-
-        Ты - дружелюбный помощник по AI-агентам. Веди естественный диалог с пользователем.
-
-        ВАЖНО: В конце каждого ответа, если видишь возможность помочь конкретным действием, добавляй JSON-команду в формате:
-        ACTION: {{"action": "название_действия", "context": {{"ключ": "значение"}}}}
-
-        Доступные действия:
-        1. show_agents - показать список агентов (когда просят показать/посмотреть агентов)
-        2. process_idea_template - заполнить идею по шаблону (когда хотят структурированно оформить идею)
-        3. process_idea_free - обработать идею свободно (когда уже описали идею)
-        4. search_owners - найти владельцев (когда ищут кого-то конкретного)
-        5. generate_ideas - сгенерировать идеи (когда просят предложить идеи)
-        6. consultation - консультация и ссылки (когда нужна консультация)
-
-        Примеры диалогов:
-
-        Пользователь: "Привет!"
-        Ответ: "Привет! 👋 Я Агентолог, помогаю с AI-агентами. Расскажите, чем могу быть полезен? Может быть, у вас есть идея для автоматизации или хотите посмотреть, какие агенты уже существуют?"
-
-        Пользователь: "У меня есть идея!"
-        Ответ: "Отлично! 🌟 Идеи - это здорово! Расскажите о ней подробнее. Хотите описать свободно, или лучше заполним структурированный шаблон по пунктам? ACTION: {{"action": "process_idea_template", "context": {{}}}}"
-
-        Пользователь: "Хочу посмотреть что у вас есть"
-        Ответ: "Конечно! 📋 Сейчас покажу весь список наших AI-агентов и аналитику по ним. ACTION: {{"action": "show_agents", "context": {{}}}}"
-
-        Пользователь: "Кто занимается аналитикой?"
-        Ответ: "🔍 Отлично, найду кто из владельцев агентов занимается аналитикой! ACTION: {{"action": "search_owners", "context": {{"search_query": "аналитика"}}}}"
-
-        Пользователь: "У нас процесс закупок долгий и неэффективный, хочется автоматизировать"
-        Ответ: "Понимаю! 🤔 Процесс закупок действительно часто можно значительно оптимизировать с помощью AI. Давайте проанализируем вашу идею! ACTION: {{"action": "process_idea_free", "context": {{"idea_text": "автоматизация процесса закупок"}}}}"
-
-        Правила:
-        - Веди дружелюбный диалог
-        - Используй эмодзи
-        - Предлагай конкретную помощь
-        - Не дублируй команды без необходимости
-        - Если действие не нужно, не добавляй ACTION
-        - Понимай намерения по смыслу, а не только по ключевым словам
-
-        Отвечай естественно, как консультант-человек! И не более 4000 символов!
-        """
-
-        logging.info(f"[GigaChat Input] {prompt}")
-        raw_response = get_llm().invoke(prompt)
-        logging.info(f"[GigaChat Output] {raw_response}")
-
-        response = clean_response_text(raw_response)
-
-        # Сохраняем в память для пользователя
-        if user_id:
-            gigachat_memory[user_id].append({
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "input": msg.strip(),
-                "output": response.strip()
-            })
-
-        # Извлекаем ACTION если есть
-        action_match = re.search(r'ACTION:\s*(\{[^}]+\})', response)
-        suggested_action = None
-        context_data = None
-        
-        if action_match:
-            try:
-                action_json = json.loads(action_match.group(1))
-                suggested_action = action_json.get("action")
-                context_data = action_json.get("context", {})
-                # Убираем ACTION из текста ответа
-                response = re.sub(r'\s*ACTION:\s*\{[^}]+\}', '', response).strip()
-            except json.JSONDecodeError:
-                logging.warning("Не удалось распарсить ACTION JSON")
-        
-        return response, suggested_action, context_data
-
-    except Exception as e:
-        return f"⚠️ Ошибка при обращении к GigaChat: {e}", None, None
-
-def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict, bool, str]:
-    """
-    Проверка идеи с помощью GigaChat
-    Возвращает: (ответ, уникальность, распарсенные_данные, предложить_обработку, похожая_идея_описание)
-    """
+def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple[str, bool, dict, bool]:
+    """Проверка идеи с помощью GigaChat"""
     try:
         agents_data = load_agents_data()
         
@@ -368,11 +160,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         Если пользователь что-то не написал, укажи это и предложи уточнить.
 
         2. Сравни инициативу пользователя с существующими:
-        - Если идея похожа на существующую — напиши "НЕ уникальна" и ОБЯЗАТЕЛЬНО укажи:
-          * Название похожей инициативы
-          * Владелец и контакт
-          * Краткое описание похожей идеи (2-3 предложения)
-          * В чем сходство
+        - Если идея похожа на существующую — напиши "НЕ уникальна" и укажи название похожей инициативы и владельца.
         - Если идея новая — напиши "Уникальна" и предложи рекомендации по улучшению.
         - Если текст непонятный — напиши "Извините, не могу понять описание".
 
@@ -397,11 +185,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
         1. Внимательно сравни инициативу пользователя с существующими инициативами.
         
         2. Определи уникальность:
-        - Если идея похожа на существующую — напиши "НЕ уникальна" и ОБЯЗАТЕЛЬНО укажи:
-          * Название похожей инициативы
-          * Владелец и контакт
-          * Краткое описание похожей идеи (2-3 предложения)
-          * В чем сходство
+        - Если идея похожа на существующую — напиши "НЕ уникальна" и укажи название похожей инициативы и владельца.
         - Если идея новая — напиши "Уникальна" и предложи рекомендации по улучшению.
         
         3. Дай детальную оценку инициативы и советы по её развитию.
@@ -426,23 +210,6 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
             })
 
         is_unique = "уникальна" in response_text.lower() and "не уникальна" not in response_text.lower()
-        
-        # Извлекаем информацию о похожей идее если она не уникальна
-        similar_idea_description = ""
-        if not is_unique:
-            # Ищем описание похожей идеи в ответе
-            lines = response_text.split('\n')
-            for i, line in enumerate(lines):
-                if 'не уникальна' in line.lower():
-                    # Собираем следующие несколько строк как описание похожей идеи
-                    similar_lines = []
-                    for j in range(i+1, min(i+8, len(lines))):  # Берем до 7 следующих строк
-                        if lines[j].strip() and not lines[j].startswith('Рекомендации'):
-                            similar_lines.append(lines[j].strip())
-                        if len(similar_lines) >= 4:  # Ограничиваем количество строк
-                            break
-                    similar_idea_description = '\n'.join(similar_lines)
-                    break
 
         # Парсинг данных из свободной формы
         parsed_data = {}
@@ -462,21 +229,77 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
                     if match:
                         parsed_data[field] = match.group(1).strip()
                         break
-        
-        if is_unique and parsed_data:
-            try:
-                cost = calculate_work_cost(parsed_data)
-                response_text += f"\n\n💰 Примерная стоимость работы: {cost}"
-            except Exception as e:
-                logging.error(f"Ошибка при расчете стоимости: {e}")
+                if is_unique and parsed_data:
+                    try:
+                        cost = calculate_work_cost(parsed_data)
+                        response_text += f"\n\n💰 Примерная стоимость работы: {cost:,.0f} ₽"
+                    except Exception as e:
+                        logging.error(f"Ошибка при расчете стоимости: {e}")
+
 
         suggest_processing = "похоже на идею" in response_text.lower() or "возможно, вы описали идею" in response_text.lower()
 
-        return response_text, is_unique, parsed_data, suggest_processing, similar_idea_description
+        return response_text, is_unique, parsed_data, suggest_processing
         
     except Exception as e:
-        return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, {}, False, ""
-    
+        return f"⚠️ Ошибка при обращении к GigaChat: {e}", False, {}, False
+
+def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[str, str | None]:
+    """Проверка общего сообщения с помощью GigaChat"""
+    try:
+        prompt = f"""
+        Пользователь написал:
+        \"\"\"{msg}\"\"\"
+
+        Проанализируй сообщение и определи:
+        
+        1. Это приветствие или начальное общение? (привет, здравствуй, начнем, что умеешь и т.д.)
+           Если да, то: CMD:start
+        
+        2. Содержит ли сообщение описание идеи для AI-агента?
+           Если да, ответь: "Похоже, вы описали идею для AI-агента...": 
+        
+        3. Просит ли пользователь помощь с генерацией или развитием идеи? 
+           (помоги с идеей, предложи идею, что можно автоматизировать и т.д.)
+           Если да, то: CMD:help_idea
+        
+        4. Если произошла проблема или что-то подобное с чат-ботом, то CMD: help 
+
+        5. Если хочет узнать про аи-агента(описание его полностью или отдельная часть), то CMD:ai_agent
+
+        6. Если пользователь хочет консультацию → CMD:consultation
+        
+        5. Если ничего из выше перечисленного не подходит, дай полезный ответ по смыслу.
+
+        Отвечай ТОЛЬКО на русском языке, без дополнительной технической информации 1 сообщением.
+        """
+
+        logging.info(f"[GigaChat Input] {prompt}")
+        raw_response = get_llm().invoke(prompt)
+        logging.info(f"[GigaChat Output] {raw_response}")
+
+        response = clean_response_text(raw_response)
+
+        # Сохраняем в память для пользователя (если user_id известен)
+        if user_id:
+            gigachat_memory[user_id].append({
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "input": prompt.strip(),
+                "output": response.strip()
+            })
+
+        # Извлекаем команду
+        command_match = re.search(r"CMD:(\w+)", response)
+        command = command_match.group(1) if command_match else None
+
+        # Убираем команду из текста ответа
+        clean_text = re.sub(r"CMD:\w+\s*", "", response).strip()
+        
+        return clean_text, command
+
+    except Exception as e:
+        return f"⚠️ Ошибка при обращении к GigaChat: {e}", None
+
 def generate_idea_suggestions(query: str = "") -> str:
     """Генерация предложений идей для AI-агентов"""
     try:
@@ -493,7 +316,6 @@ def generate_idea_suggestions(query: str = "") -> str:
         Запрос: "{query}"
         
         Уже существующие типы агентов: {existing_types_str}
-        А так же краткое описание этого агента.
         
         Предложи 3-5 интересных и практических идей для AI-агентов, которые могли бы быть полезны.
         Учитывай:
@@ -709,7 +531,7 @@ def generate_agents_summary_file(agents_file_path: str) -> str:
         print(f"⚠️ Ошибка при создании аналитического файла: {e}")
         return None
 
-def generate_files(data: dict, cost_info: str = "") -> tuple[str, str]:
+def generate_files(data: dict) -> tuple[str, str]:
     """Генерация Word и Excel файлов с данными инициативы"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     word_path = f"initiative_{timestamp}.docx"
@@ -733,9 +555,6 @@ def generate_files(data: dict, cost_info: str = "") -> tuple[str, str]:
     
     # Основной контент
     for key, value in data.items():
-        if key == "user_id":  # Пропускаем служебное поле
-            continue
-            
         # Заголовок поля
         heading_para = doc.add_paragraph()
         heading_run = heading_para.add_run(f"📋 {key}")
@@ -754,11 +573,6 @@ def generate_files(data: dict, cost_info: str = "") -> tuple[str, str]:
         content_run.font.size = Pt(12)
         
         doc.add_paragraph()  # Пустая строка между разделами
-    
-    # Добавляем информацию о стоимости если есть
-    if cost_info:
-        cost_heading = doc.add_heading("💰 Информация о стоимости", level=2)
-        doc.add_paragraph(cost_info)
     
     # Футер
     footer_para = doc.add_paragraph()
@@ -793,17 +607,7 @@ def generate_files(data: dict, cost_info: str = "") -> tuple[str, str]:
     
     # Данные
     for key, value in data.items():
-        if key == "user_id":  # Пропускаем служебное поле
-            continue
         ws.append([key, str(value)])
-        for cell in ws[ws.max_row]:
-            cell.border = thin_border
-            cell.alignment = wrap_alignment
-    
-    # Добавляем информацию о стоимости если есть
-    if cost_info:
-        ws.append(["", ""])  # Пустая строка
-        ws.append(["Информация о стоимости", cost_info])
         for cell in ws[ws.max_row]:
             cell.border = thin_border
             cell.alignment = wrap_alignment
@@ -825,6 +629,7 @@ def generate_files(data: dict, cost_info: str = "") -> tuple[str, str]:
     wb.save(excel_path)
 
     return word_path, excel_path
+
 
 def calculate_work_cost(parsed_data: dict, is_unique: bool = True) -> str:
     """
