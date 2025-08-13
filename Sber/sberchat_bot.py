@@ -172,10 +172,12 @@ def search_owners_handler(update: UpdateMessage) -> None:
         # Сообщаем пользователю, что данные загружены
         bot.messaging.send_message(
             peer,
-            f"Файл {os.path.basename(agents_file_path)} успешно загружен.\n"
-            "Напишите, какую информацию хотите получить:\n"
-            "• all — показать весь список\n"
-            "• <имя агента> — поиск по имени"
+            f"✅ Файл {os.path.basename(agents_file_path)} успешно загружен!\n\n"
+            "💬 Теперь опишите свободно, что вас интересует:\n"
+            "• Кто занимается аналитикой?\n"
+            "• Найти агента для автоматизации документов\n"
+            "• Покажи всех владельцев\n"
+            "• И любые другие вопросы..."
         )
 
     except Exception as e:
@@ -275,6 +277,7 @@ def text_handler(update: UpdateMessage, widget=None):
     logging.info(f"📩 Пользователь {user_id}: {text}")
     logging.info(f"📊 Состояние: {state}")
 
+    # Обработка специальных состояний ПЕРВЫМ ПРИОРИТЕТОМ
     if state["mode"] == config['states']['idea_choose_format']:
         if "шаблон" in text.lower():
             state["mode"] = config['states']['idea_template']
@@ -338,14 +341,14 @@ def text_handler(update: UpdateMessage, widget=None):
         return
     
     elif state["mode"] == config['states']['search_owners']:
-        bot.messaging.send_message(peer, config['bot_settings']['commands']['search_owners']['responses']['searching'])
+        bot.messaging.send_message(peer, "🔍 Ищу подходящих владельцев...")
         
         try:
             owners_info = find_agent_owners(text)
             bot.messaging.send_message(peer, owners_info)
             
             user_states[user_id] = {"mode": config['states']['main_menu']}
-            bot.messaging.send_message(peer, config['bot_settings']['commands']['search_owners']['responses']['new_search'])
+            bot.messaging.send_message(peer, "\n💬 Есть еще вопросы? Спрашивайте свободно или используйте `/help` для списка команд!")
             
         except Exception as e:
             logging.error(f"Ошибка при поиске владельцев: {e}")
@@ -354,11 +357,11 @@ def text_handler(update: UpdateMessage, widget=None):
         return
 
     elif state["mode"] == config['states']['help_with_ideas']:
-        bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['generating'])
+        bot.messaging.send_message(peer, "💡 Генерирую идеи специально для вас...")
         
         try:
             ideas_response = generate_idea_suggestions(text)
-            bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['result'].format(ideas=ideas_response))
+            bot.messaging.send_message(peer, f"🎯 **Вот идеи для вас:**\n\n{ideas_response}")
             bot.messaging.send_message(peer, "\n🔹 Понравилась какая-то идея? Напишите `/idea` чтобы детально её проработать!")
             
             user_states[user_id] = {"mode": config['states']['main_menu']}
@@ -393,12 +396,15 @@ def text_handler(update: UpdateMessage, widget=None):
     
     # Обработка обычных сообщений через GigaChat
     try:
+        logging.info(f"🤖 Отправляем сообщение в GigaChat: {text}")
         gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
-        logging.info(f"🔎 Ответ GigaChat: {gpt_response}, Обнаружена команда: {detected_command}")
+        logging.info(f"🔎 Ответ GigaChat: '{gpt_response}', Обнаружена команда: {detected_command}")
 
         # Если GigaChat обнаружил намерение выполнить команду
         if detected_command:
-            # Сначала отправляем ответ от GigaChat
+            logging.info(f"✅ Выполняем автоматически обнаруженную команду: {detected_command}")
+            
+            # Сначала отправляем ответ от GigaChat (если он не пустой)
             if gpt_response and gpt_response.strip():
                 bot.messaging.send_message(peer, gpt_response)
             
@@ -420,13 +426,15 @@ def text_handler(update: UpdateMessage, widget=None):
         else:
             # Просто ведем обычный диалог
             if gpt_response and gpt_response.strip():
+                logging.info("💬 Отправляем диалоговый ответ")
                 bot.messaging.send_message(peer, gpt_response)
             else:
-                bot.messaging.send_message(peer, config['error_messages']['not_understood'])
+                logging.warning("⚠️ Пустой ответ от GigaChat")
+                bot.messaging.send_message(peer, "🤔 Извините, не совсем понял ваш вопрос. Попробуйте переформулировать или используйте `/help` для списка команд.")
     
     except Exception as e:
-        logging.error(f"Ошибка в text_handler: {e}")
-        bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+        logging.error(f"❌ Ошибка в text_handler: {e}")
+        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при обработке сообщения. Попробуйте еще раз или обратитесь за помощью через `/help`")
 
 def main():
     global bot
