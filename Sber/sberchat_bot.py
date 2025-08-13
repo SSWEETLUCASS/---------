@@ -279,7 +279,6 @@ def text_handler(update: UpdateMessage, widget=None):
                 bot.messaging.send_message(peer, "🤔 Не совсем понял ваш вопрос. Попробуйте иначе или используйте /help")
     except Exception as e:
         logging.error(f"Ошибка в text_handler: {e}")
-        bot.messaging.send_message(peer, "⚠️ Произошла ошибка при обработке сообщения.")
 
 def main():
     global bot
