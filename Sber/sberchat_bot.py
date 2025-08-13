@@ -78,134 +78,153 @@ def send_file_sync(peer, file_path, text=None, name=None):
         return None
 
 def start_handler(update: UpdateMessage) -> None:
-    """Обработчик команды /start - переводит в режим свободного диалога"""
+    """Обработчик команды /start"""
     user_id = update.peer.id
-    user_states[user_id] = {"mode": "free_dialog"}
-    bot.messaging.send_message(update.peer, 
-        "👋 Привет! Я Агентолог - ваш помощник по AI-агентам.\n\n"
-        "💬 Просто общайтесь со мной свободно! Расскажите:\n"
-        "• Есть ли у вас идеи для автоматизации?\n"
-        "• Интересуют ли вас существующие AI-агенты?\n"
-        "• Нужна ли помощь с чем-то еще?\n\n"
-        "Я понимаю естественную речь и помогу вам! 🤖"
-    )
+    user_states[user_id] = {"mode": config['states']['main_menu']}
+    bot.messaging.send_message(update.peer, config['bot_settings']['commands']['start']['response'])
 
-def help_handler(update: UpdateMessage) -> None:
-    """Обработчик команды помощи"""
-    bot.messaging.send_message(update.peer, 
-        "🆘 **Помощь по работе с ботом**\n\n"
-        "Я работаю в режиме свободного диалога! Просто пишите мне как обычному собеседнику.\n\n"
-        "🔹 **Что я умею:**\n"
-        "• Помогаю с идеями для AI-агентов\n"
-        "• Показываю существующие агенты\n"
-        "• Ищу подходящих владельцев агентов\n"
-        "• Генерирую предложения для автоматизации\n"
-        "• Веду обычный диалог и консультирую\n\n"
-        "💬 **Примеры фраз:**\n"
-        "• \"Привет! У меня есть идея для автоматизации\"\n"
-        "• \"Покажи что у вас есть из агентов\"\n"
-        "• \"Кто занимается аналитикой?\"\n"
-        "• \"Помоги придумать идею\"\n"
-        "• \"Нужна консультация\"\n\n"
-        "Просто говорите со мной естественно! 😊"
-    )
-
-def execute_action_from_dialog(action: str, update: UpdateMessage, context_data: dict = None):
-    """Выполнение действия, предложенного в диалоге"""
+def idea_handler(update: UpdateMessage) -> None:
+    """Обработчик для работы с идеями"""
     peer = update.peer
     user_id = peer.id
     
+    if user_id in user_states and user_states[user_id].get("mode", "").startswith("idea_"):
+        bot.messaging.send_message(peer, config['error_messages']['already_in_process'])
+        return
+    
+    user_states[user_id] = {
+        "mode": config['states']['idea_choose_format'],
+        "current_field": 0,
+        "idea_data": {}
+    }
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
+
+def agent_handler(update: UpdateMessage) -> None:
+    """Обработчик для получения списка AI-агентов"""
+    peer = update.peer
+    
     try:
-        if action == "show_agents":
-            # Показать список агентов
-            agents_file_path = config['file_settings']['agents_file']
-            if not os.path.exists(agents_file_path):
-                bot.messaging.send_message(peer, "📋 Создаю файл с агентами...")
-                wb = Workbook()
-                ws = wb.active
-                ws.append(["Блок", "ССП", "Владелец", "Контакт", "Название", "Краткое название", "Описание", "Тип"])
-                wb.save(agents_file_path)
+        agents_file_path = config['file_settings']['agents_file']
+        if not os.path.exists(agents_file_path):
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_not_found'])
+            wb = Workbook()
+            ws = wb.active
+            ws.append(["Блок", "ССП", "Владелец", "Контакт", "Название", "Краткое название", "Описание", "Тип"])
+            wb.save(agents_file_path)
+        
+        summary_file = generate_agents_summary_file(agents_file_path)
+        
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['initial'])
+        
+        # Отправляем основной файл
+        result1 = send_file_sync(peer, agents_file_path, text="📋 Основной файл с агентами", name="agents.xlsx")
+        if not result1:
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="основной"))
+        
+        # Отправляем аналитический файл если он создан
+        if summary_file and os.path.exists(summary_file):
+            result2 = send_file_sync(peer, summary_file, text="📊 Аналитический отчет", name=os.path.basename(summary_file))
+            if not result2:
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
             
-            summary_file = generate_agents_summary_file(agents_file_path)
-            
-            # Отправляем основной файл
-            result1 = send_file_sync(peer, agents_file_path, text="📋 Вот список всех наших агентов!", name="agents.xlsx")
-            if not result1:
-                bot.messaging.send_message(peer, "⚠️ Не удалось отправить основной файл")
-            
-            # Отправляем аналитический файл если он создан
-            if summary_file and os.path.exists(summary_file):
-                result2 = send_file_sync(peer, summary_file, text="📊 И аналитический отчет", name=os.path.basename(summary_file))
-                if result2:
-                    try:
-                        os.remove(summary_file)
-                    except Exception as e:
-                        logging.warning(f"Не удалось удалить временный файл: {e}")
-                        
-        elif action == "process_idea_template":
-            # Начать заполнение шаблона идеи
-            user_states[user_id] = {
-                "mode": "idea_template",
-                "current_field": 0,
-                "idea_data": context_data or {}
-            }
-            process_template_idea(update, user_id)
-            
-        elif action == "process_idea_free":
-            # Обработать идею в свободной форме
-            if context_data and "idea_text" in context_data:
-                process_free_form_idea(update, context_data["idea_text"], user_id)
-            else:
-                user_states[user_id] = {"mode": "idea_free_form"}
-                bot.messaging.send_message(peer, "💡 Отлично! Опишите вашу идею подробно - я её проанализирую!")
-                
-        elif action == "search_owners":
-            # Поиск владельцев
-            if context_data and "search_query" in context_data:
-                search_result = find_agent_owners(context_data["search_query"])
-                bot.messaging.send_message(peer, search_result)
-            else:
-                user_states[user_id] = {"mode": "search_owners_dialog"}
-                bot.messaging.send_message(peer, "🔍 Конечно! Опишите, что именно вас интересует - я найду подходящих владельцев агентов.")
-                
-        elif action == "generate_ideas":
-            # Генерация идей
-            if context_data and "domain" in context_data:
-                ideas = generate_idea_suggestions(context_data["domain"])
-                bot.messaging.send_message(peer, f"💡 **Вот идеи специально для вас:**\n\n{ideas}")
-            else:
-                user_states[user_id] = {"mode": "generate_ideas_dialog"}
-                bot.messaging.send_message(peer, "🌟 Конечно! В какой области вы хотели бы получить идеи для автоматизации?")
-                
-        elif action == "consultation":
-            # Консультация
-            bot.messaging.send_message(peer, config['bot_settings']['commands']['consultation']['response'])
+            # Удаляем временный файл
+            try:
+                os.remove(summary_file)
+            except Exception as e:
+                logging.warning(f"Не удалось удалить временный файл: {e}")
             
     except Exception as e:
-        logging.error(f"Ошибка при выполнении действия {action}: {e}")
-        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка: {e}")
+        logging.error(f"Ошибка в agent_handler: {e}")
+        bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error=e))
+
+def search_owners_handler(update: UpdateMessage) -> None:
+    """Обработчик для поиска владельцев агентов по локальному файлу agents.xlsx"""
+    peer = update.peer
+    user_id = peer.id
+
+    try:
+        agents_file_path = config['file_settings']['agents_file']
+
+        # Проверка наличия файла
+        if not os.path.exists(agents_file_path):
+            bot.messaging.send_message(peer, config['error_messages']['file_not_found'])
+            return
+
+        # Загружаем Excel
+        wb = load_workbook(agents_file_path)
+        sheet = wb.active
+
+        # Читаем заголовки
+        headers = [cell.value for cell in sheet[1]]
+
+        # Читаем строки в список словарей
+        agents_data = []
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            row_dict = dict(zip(headers, row))
+            agents_data.append(row_dict)
+
+        # Сохраняем состояние пользователя
+        user_states[user_id] = {
+            "mode": config['states']['search_owners'],
+            "agents_data": agents_data
+        }
+
+        # Сообщаем пользователю, что данные загружены
+        bot.messaging.send_message(
+            peer,
+            f"✅ Файл {os.path.basename(agents_file_path)} успешно загружен!\n\n"
+            "💬 Теперь опишите свободно, что вас интересует:\n"
+            "• Кто занимается аналитикой?\n"
+            "• Найти агента для автоматизации документов\n"
+            "• Покажи всех владельцев\n"
+            "• И любые другие вопросы..."
+        )
+
+    except Exception as e:
+        logging.error(f"Ошибка в search_owners_handler: {e}")
+        bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+
+def help_idea_handler(update: UpdateMessage) -> None:
+    """Обработчик для помощи с генерацией идей"""
+    peer = update.peer
+    user_id = peer.id
+    
+    user_states[user_id] = {"mode": config['states']['help_with_ideas']}
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['initial'])
+
+def consultation_handler(update: UpdateMessage) -> None:
+    """Обработчик для консультации и полезных ссылок"""
+    peer = update.peer
+    user_id = peer.id
+    
+    user_states[user_id] = {"mode": config['states']['main_menu']}
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['consultation']['response'])
+
+def help_handler(update: UpdateMessage) -> None:
+    """Обработчик команды помощи"""
+    bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
 
 def process_template_idea(update: UpdateMessage, user_id: int) -> None:
     """Обработка идеи по шаблону (поэтапно)"""
     peer = update.peer
-    text = update.message.text_message.text.strip() if update.message and update.message.text_message else ""
+    text = update.message.text_message.text.strip()
     
     state = user_states[user_id]
     current_field = state["current_field"]
     
-    if current_field > 0 and text:
+    if current_field > 0:
         field_name = config['template_fields'][current_field - 1]
         state["idea_data"][field_name] = text
     
     if current_field < len(config['template_fields']):
         field_name = config['template_fields'][current_field]
-        bot.messaging.send_message(peer, f"📝 **{field_name}**\n\nОпишите этот аспект вашей идеи:")
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['template_field'].format(field=field_name))
         state["current_field"] += 1
     else:
-        # Завершаем заполнение шаблона
-        bot.messaging.send_message(peer, "✅ Отлично! Анализирую вашу идею...")
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
         
         try:
+            # Добавляем user_id в данные для отслеживания истории
             state["idea_data"]["user_id"] = user_id
             
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
@@ -217,140 +236,205 @@ def process_template_idea(update: UpdateMessage, user_id: int) -> None:
             bot.messaging.send_message(peer, full_response)
             
             if state["idea_data"]:
-                generate_and_send_files(peer, state["idea_data"], cost_info)
+                word_path, excel_path = generate_files(state["idea_data"], cost_info)
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
+                
+                # Отправляем Word файл
+                result1 = send_file_sync(peer, word_path, text="📄 Техническое описание", name=os.path.basename(word_path))
+                if not result1:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
+                
+                # Отправляем Excel файл
+                result2 = send_file_sync(peer, excel_path, text="📊 Структурированные данные", name=os.path.basename(excel_path))
+                if not result2:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
+                
+                # Удаляем временные файлы
+                try:
+                    os.remove(word_path)
+                    os.remove(excel_path)
+                except Exception as e:
+                    logging.warning(f"Не удалось удалить временные файлы: {e}")
             
-            user_states[user_id] = {"mode": "free_dialog"}
-            bot.messaging.send_message(peer, "\n💬 Есть еще вопросы или идеи? Спрашивайте!")
+            user_states[user_id] = {"mode": config['states']['main_menu']}
+            bot.messaging.send_message(peer, "\n🔄 Для новой проверки напишите `/start`")
             
         except Exception as e:
             logging.error(f"Ошибка при обработке шаблонной идеи: {e}")
-            bot.messaging.send_message(peer, f"⚠️ Ошибка при анализе: {e}")
-            user_states[user_id] = {"mode": "free_dialog"}
-
-def process_free_form_idea(update: UpdateMessage, idea_text: str, user_id: int):
-    """Обработка идеи в свободной форме"""
-    peer = update.peer
-    
-    bot.messaging.send_message(peer, "🤖 Анализирую вашу идею...")
-    
-    try:
-        user_data = {"Описание в свободной форме": idea_text, "user_id": user_id}
-        response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
-            idea_text, user_data, is_free_form=True
-        )
-        
-        cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
-        full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}"
-        bot.messaging.send_message(peer, full_response)
-        
-        if parsed_data:
-            generate_and_send_files(peer, parsed_data, cost_info)
-        
-        user_states[user_id] = {"mode": "free_dialog"}
-        bot.messaging.send_message(peer, "\n💬 Как вам результат? Есть вопросы или другие идеи?")
-        
-    except Exception as e:
-        logging.error(f"Ошибка при обработке свободной идеи: {e}")
-        bot.messaging.send_message(peer, f"⚠️ Ошибка при анализе: {e}")
-        user_states[user_id] = {"mode": "free_dialog"}
-
-def generate_and_send_files(peer, data, cost_info):
-    """Генерация и отправка файлов"""
-    try:
-        word_path, excel_path = generate_files(data, cost_info)
-        bot.messaging.send_message(peer, "📄 Готовлю файлы для вас...")
-        
-        # Отправляем Word файл
-        result1 = send_file_sync(peer, word_path, text="📄 Техническое описание", name=os.path.basename(word_path))
-        if not result1:
-            bot.messaging.send_message(peer, "⚠️ Не удалось отправить Word файл")
-        
-        # Отправляем Excel файл
-        result2 = send_file_sync(peer, excel_path, text="📊 Структурированные данные", name=os.path.basename(excel_path))
-        if not result2:
-            bot.messaging.send_message(peer, "⚠️ Не удалось отправить Excel файл")
-        
-        # Удаляем временные файлы
-        try:
-            os.remove(word_path)
-            os.remove(excel_path)
-        except Exception as e:
-            logging.warning(f"Не удалось удалить временные файлы: {e}")
-            
-    except Exception as e:
-        logging.error(f"Ошибка при генерации файлов: {e}")
-        bot.messaging.send_message(peer, f"⚠️ Ошибка при создании файлов: {e}")
+            bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
 
 def text_handler(update: UpdateMessage, widget=None):
-    """Основной обработчик текстовых сообщений - полностью диалоговый режим"""
+    """Основной обработчик текстовых сообщений"""
     if not update.message or not update.message.text_message:
         return
 
     text = update.message.text_message.text.strip()
     user_id = update.peer.id
     peer = update.peer
-    state = user_states.get(user_id, {"mode": "free_dialog"})
+    state = user_states.get(user_id, {"mode": config['states']['main_menu']})
     
     logging.info(f"📩 Пользователь {user_id}: {text}")
     logging.info(f"📊 Состояние: {state}")
 
-    # Обработка команд (только основные)
-    if text.startswith('/'):
-        command = text[1:].lower()
-        if command == "start":
-            start_handler(update)
+    # Обработка специальных состояний ПЕРВЫМ ПРИОРИТЕТОМ
+    if state["mode"] == config['states']['idea_choose_format']:
+        if "шаблон" in text.lower():
+            state["mode"] = config['states']['idea_template']
+            state["current_field"] = 0
+            state["idea_data"] = {}
+            process_template_idea(update, user_id)
             return
-        elif command == "help":
-            help_handler(update)
+        elif "сам" in text.lower():
+            state["mode"] = config['states']['idea_free_form']
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['free_form_prompt'])
             return
-        # Остальные команды убираем - все через диалог
-
-    # Специальные состояния для поэтапной работы
-    if state["mode"] == "idea_template":
+        else:
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['template_choice_error'])
+            return
+    
+    elif state["mode"] == config['states']['idea_template']:
         process_template_idea(update, user_id)
         return
     
-    elif state["mode"] == "idea_free_form":
-        process_free_form_idea(update, text, user_id)
+    elif state["mode"] == config['states']['idea_free_form']:
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
+        
+        try:
+            user_data = {"Описание в свободной форме": text, "user_id": user_id}
+            response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
+                text, user_data, is_free_form=True
+            )
+            
+            cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
+            full_response = f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}"
+            bot.messaging.send_message(peer, full_response)
+            
+            if parsed_data:
+                word_path, excel_path = generate_files(parsed_data, cost_info)
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
+                
+                # Отправляем Word файл
+                result1 = send_file_sync(peer, word_path, text="📄 Техническое описание", name=os.path.basename(word_path))
+                if not result1:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Word"))
+                
+                # Отправляем Excel файл
+                result2 = send_file_sync(peer, excel_path, text="📊 Структурированные данные", name=os.path.basename(excel_path))
+                if not result2:
+                    bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error="Excel"))
+                
+                # Удаляем временные файлы
+                try:
+                    os.remove(word_path)
+                    os.remove(excel_path)
+                except Exception as e:
+                    logging.warning(f"Не удалось удалить временные файлы: {e}")
+            
+            user_states[user_id] = {"mode": config['states']['main_menu']}
+            bot.messaging.send_message(peer, "\n🔄 Для новой проверки напишите `/start`")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при обработке свободной идеи: {e}")
+            bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
         return
     
-    elif state["mode"] == "search_owners_dialog":
-        search_result = find_agent_owners(text)
-        bot.messaging.send_message(peer, search_result)
-        user_states[user_id] = {"mode": "free_dialog"}
-        bot.messaging.send_message(peer, "\n💬 Нашли нужное? Есть еще вопросы?")
-        return
+    elif state["mode"] == config['states']['search_owners']:
+        bot.messaging.send_message(peer, "🔍 Ищу подходящих владельцев...")
         
-    elif state["mode"] == "generate_ideas_dialog":
-        ideas = generate_idea_suggestions(text)
-        bot.messaging.send_message(peer, f"💡 **Вот идеи для вас:**\n\n{ideas}")
-        user_states[user_id] = {"mode": "free_dialog"}
-        bot.messaging.send_message(peer, "\n🔹 Понравилась какая-то идея? Расскажите больше!")
+        try:
+            owners_info = find_agent_owners(text)
+            bot.messaging.send_message(peer, owners_info)
+            
+            user_states[user_id] = {"mode": config['states']['main_menu']}
+            bot.messaging.send_message(peer, "\n💬 Есть еще вопросы? Спрашивайте свободно или используйте `/help` для списка команд!")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при поиске владельцев: {e}")
+            bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    # Основной диалоговый режим
+    elif state["mode"] == config['states']['help_with_ideas']:
+        bot.messaging.send_message(peer, "💡 Генерирую идеи специально для вас...")
+        
+        try:
+            ideas_response = generate_idea_suggestions(text)
+            bot.messaging.send_message(peer, f"🎯 **Вот идеи для вас:**\n\n{ideas_response}")
+            bot.messaging.send_message(peer, "\n🔹 Понравилась какая-то идея? Напишите `/idea` чтобы детально её проработать!")
+            
+            user_states[user_id] = {"mode": config['states']['main_menu']}
+            
+        except Exception as e:
+            logging.error(f"Ошибка при генерации идей: {e}")
+            bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+            user_states[user_id] = {"mode": config['states']['main_menu']}
+        return
+
+    # Обработка команд
+    if text.startswith('/'):
+        command = text[1:].lower()
+        
+        if command == "start":
+            start_handler(update)
+        elif command == "idea":
+            idea_handler(update)
+        elif command == "ai_agent":
+            agent_handler(update)
+        elif command in ["group", "search_owners"]:
+            search_owners_handler(update)
+        elif command == "help_idea":
+            help_idea_handler(update)
+        elif command == "consultation":
+            consultation_handler(update)
+        elif command == "help":
+            help_handler(update)
+        else:
+            bot.messaging.send_message(peer, config['error_messages']['unknown_command'])
+        return
+    
+    # Обработка обычных сообщений через GigaChat
     try:
-        logging.info(f"🤖 Отправляем в GigaChat для диалога: {text}")
-        
-        # Получаем ответ и возможные действия от GigaChat
-        gpt_response, suggested_action, context_data = check_general_message_with_gigachat(text, user_id)
-        
-        logging.info(f"🔎 Ответ GigaChat: '{gpt_response}', Предложенное действие: {suggested_action}")
+        logging.info(f"🤖 Отправляем сообщение в GigaChat: {text}")
+        gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
+        logging.info(f"🔎 Ответ GigaChat: '{gpt_response}', Обнаружена команда: {detected_command}")
 
-        # Всегда сначала отправляем диалоговый ответ
-        if gpt_response and gpt_response.strip():
-            bot.messaging.send_message(peer, gpt_response)
-        
-        # Если есть предложенное действие, выполняем его
-        if suggested_action:
-            execute_action_from_dialog(suggested_action, update, context_data)
-        
+        # Если GigaChat обнаружил намерение выполнить команду
+        if detected_command:
+            logging.info(f"✅ Выполняем автоматически обнаруженную команду: {detected_command}")
+            
+            # Сначала отправляем ответ от GigaChat (если он не пустой)
+            if gpt_response and gpt_response.strip():
+                bot.messaging.send_message(peer, gpt_response)
+            
+            # Затем выполняем соответствующую команду
+            if detected_command == "start":
+                start_handler(update)
+            elif detected_command == "ai_agent":
+                agent_handler(update)
+            elif detected_command == "search_owners":
+                search_owners_handler(update)
+            elif detected_command == "idea":
+                idea_handler(update)
+            elif detected_command == "help_idea":
+                help_idea_handler(update)
+            elif detected_command == "consultation":
+                consultation_handler(update)
+            elif detected_command == "help":
+                help_handler(update)
+        else:
+            # Просто ведем обычный диалог
+            if gpt_response and gpt_response.strip():
+                logging.info("💬 Отправляем диалоговый ответ")
+                bot.messaging.send_message(peer, gpt_response)
+            else:
+                logging.warning("⚠️ Пустой ответ от GigaChat")
+                bot.messaging.send_message(peer, "🤔 Извините, не совсем понял ваш вопрос. Попробуйте переформулировать или используйте `/help` для списка команд.")
+    
     except Exception as e:
         logging.error(f"❌ Ошибка в text_handler: {e}")
-        bot.messaging.send_message(peer, 
-            "⚠️ Произошла ошибка при обработке сообщения.\n\n"
-            "💬 Попробуйте переформулировать вопрос или напишите /help для получения помощи."
-        )
+        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка при обработке сообщения. Попробуйте еще раз или обратитесь за помощью через `/help`")
 
 def main():
     global bot
@@ -360,12 +444,16 @@ def main():
         "is_secure": config['bot_settings']['is_secure'],
     })
 
-    # Регистрируем только основные команды
-    bot.messaging.command_handler([
-        CommandHandler(start_handler, "start"),
-        CommandHandler(help_handler, "help"),
-    ])
+    # Регистрация команд из конфига
+    handlers = []
+    for cmd, cmd_data in config['bot_settings']['commands'].items():
+        handler_func = globals()[cmd_data['handler']]
+        handlers.append(CommandHandler(handler_func, cmd))
+        if 'aliases' in cmd_data:
+            for alias in cmd_data['aliases']:
+                handlers.append(CommandHandler(handler_func, alias))
     
+    bot.messaging.command_handler(handlers)
     bot.messaging.message_handler([
         MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)
     ])
