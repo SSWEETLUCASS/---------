@@ -43,36 +43,15 @@ logging.basicConfig(
 user_states = {}
 bot = None
 
-def send_file_sync(peer, file_path, text=None, name=None):
+def send_file(message: UpdateMessage,file_path) -> None:
     """Синхронная отправка файла в чат через правильный API"""
     try:
-        logging.info(f"🔄 Отправляем файл: {name or file_path}")
+        logging.info(f"🔄 Отправляем файл: {file_path}")
         
-        # Проверяем размер файла
-        if os.path.exists(file_path):
-            file_size = os.path.getsize(file_path)
-            logging.info(f"📊 Размер файла: {file_size} байт")
-            
-            if file_size == 0:
-                logging.warning("⚠️ Файл пуст!")
-                return None
-        
-        # Читаем файл в байты
-        with open(file_path, "rb") as f:
-            file_bytes = f.read()
-        
-        # Используем правильный метод отправки
-        result = bot.messaging.send_file_sync(
-            peer=peer,
-            file=file_bytes,
-            text=text,
-            name=name or os.path.basename(file_path),
-            is_forward_ban=True
-        )
-        
-        logging.info(f"✅ Файл успешно отправлен: {result}")
-        return result
-        
+        bot.messaging.send_file_sync(message.peer,file_path)
+
+        logging.info(f"✅ Файл успешно отправлен: {file_path}")
+
     except Exception as e:
         logging.error(f"❌ Ошибка отправки файла: {e}")
         return None
@@ -117,13 +96,13 @@ def agent_handler(update: UpdateMessage) -> None:
         bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['initial'])
         
         # Отправляем основной файл
-        result1 = send_file_sync(peer, agents_file_path, text="📋 Основной файл с агентами", name="agents.xlsx")
+        result1 = send_file(peer, path="agents.xlsx")
         if not result1:
             bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="основной"))
         
         # Отправляем аналитический файл если он создан
         if summary_file and os.path.exists(summary_file):
-            result2 = send_file_sync(peer, summary_file, text="📊 Аналитический отчет", name=os.path.basename(summary_file))
+            result2 = send_file(peer, summary_file, text="📊 Аналитический отчет", name=os.path.basename(summary_file))
             if not result2:
                 bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
             
