@@ -535,7 +535,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
                     if match:
                         value = match.group(1).strip()
                         # Очищаем от лишних символов
-                        value = re.sub(r'^\[|\], '', value)
+                        value = re.sub(r'^\[|\], ''', value)
                         value = value.strip()
                         if value and len(value) > 5:  # Минимальная длина для значимого ответа
                             parsed_data[field] = value
@@ -632,7 +632,12 @@ def generate_idea_suggestions(query: str = "") -> str:
             response += "\n\n🚀 Выберите интересную идею, и я помогу детально её проработать с расчетом стоимости!"
         
         logging.info(f"✅ Сгенерировано идей для пользователя")
-        return
+        return response
+
+    except Exception as e:
+        logging.error(f"❌ Ошибка при генерации идей: {e}")
+        return "⚠️ Произошла ошибка при генерации идей."
+
 
 def find_agent_owners(query: str) -> str:
     """Поиск владельцев агентов по запросу"""
