@@ -37,12 +37,17 @@ logging.basicConfig(
     filename=config['logging']['file']
 )
 
-# Глобальные переменные
 user_states = {}
 bot = None
 
+def get_user_name(update: UpdateMessage) -> str:
+    try:
+        sender = update.message.sender_data
+        return f"{sender.name} {sender.nick}" if sender else f"ID:{update.peer.id}"
+    except Exception:
+        return f"ID:{update.peer.id}"
+
 def send_file(peer, file_path, text=None, name=None):
-    """Отправка файла с возможным описанием"""
     try:
         logging.info(f"📤 Отправка файла: {file_path}")
         with open(file_path, "rb") as f:
@@ -89,12 +94,9 @@ def agent_handler(update: UpdateMessage):
         summary_file = generate_agents_summary_file(agents_file_path)
         bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['initial'])
 
-        if not send_file(peer, agents_file_path):
-            bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="основной"))
-
+        send_file(peer, agents_file_path)
         if summary_file and os.path.exists(summary_file):
-            if not send_file(peer, summary_file, text="📊 Аналитический отчет"):
-                bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
+            send_file(peer, summary_file, text="📊 Аналитический отчет")
             try:
                 os.remove(summary_file)
             except Exception as e:
@@ -127,12 +129,6 @@ def search_owners_handler(update: UpdateMessage):
         logging.error(f"Ошибка в search_owners_handler: {e}")
         bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
 
-def help_idea_handler(update: UpdateMessage):
-    peer = update.peer
-    user_id = peer.id
-    user_states[user_id] = {"mode": config['states']['help_with_ideas']}
-    bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['initial'])
-
 def consultation_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
@@ -160,8 +156,8 @@ def process_template_idea(update: UpdateMessage, user_id: int):
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
         try:
             state["idea_data"]["user_id"] = user_id
-            response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, state["idea_data"], is_free_form=False)
-            cost_info = calculate_work_cost(state["idea_data"], is_unique)
+            response, is_unique, parsed_data, _, _ = check_idea_with_gigachat_local(text, state["idea_data"], is_free_form=False)
+            cost_info = calculate_work_cost(parsed_data, is_unique)
             bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
 
             if state["idea_data"]:
@@ -181,15 +177,23 @@ def process_template_idea(update: UpdateMessage, user_id: int):
             bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
             user_states[user_id] = {"mode": config['states']['main_menu']}
 
+def is_idea_text(text: str) -> bool:
+    idea_keywords = ["идея", "хочу автоматизировать", "надо сделать", "предлагаю", "улучшить", "оптимизировать"]
+    return len(text) > 15 and any(k in text.lower() for k in idea_keywords)
+
 def text_handler(update: UpdateMessage, widget=None):
     if not update.message or not update.message.text_message:
         return
     text = update.message.text_message.text.strip()
     user_id = update.peer.id
     peer = update.peer
+    user_name = get_user_name(update)
     state = user_states.get(user_id, {"mode": config['states']['main_menu']})
 
-    # Спецрежимы
+    logging.info(f"📩 [{user_name}] ({user_id}): {text}")
+    logging.info(f"📊 Состояние: {state}")
+
+    # Обработка режимов
     if state["mode"] == config['states']['idea_choose_format']:
         if "шаблон" in text.lower():
             state["mode"] = config['states']['idea_template']
@@ -207,11 +211,11 @@ def text_handler(update: UpdateMessage, widget=None):
         process_template_idea(update, user_id)
         return
 
-    elif state["mode"] == config['states']['idea_free_form']:
+    elif state["mode"] == config['states']['idea_free_form'] or is_idea_text(text):
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
         try:
             user_data = {"Описание в свободной форме": text, "user_id": user_id}
-            response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
+            response, is_unique, parsed_data, _, _ = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
             cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
             bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
             if parsed_data:
@@ -253,11 +257,10 @@ def text_handler(update: UpdateMessage, widget=None):
         user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    # Обычный диалог через GigaChat
+    # Обычный диалог
     try:
-        gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
+        gpt_response, detected_command, _ = check_general_message_with_gigachat(text, user_id)
         if detected_command:
-            # Выполняем только команду, без повторного текста от GPT
             if detected_command == "start":
                 start_handler(update)
             elif detected_command == "ai_agent":
@@ -266,19 +269,17 @@ def text_handler(update: UpdateMessage, widget=None):
                 search_owners_handler(update)
             elif detected_command == "idea":
                 idea_handler(update)
-            elif detected_command == "help_idea":
-                help_idea_handler(update)
             elif detected_command == "consultation":
                 consultation_handler(update)
             elif detected_command == "help":
                 help_handler(update)
+        elif gpt_response and gpt_response.strip():
+            bot.messaging.send_message(peer, gpt_response)
         else:
-            if gpt_response and gpt_response.strip():
-                bot.messaging.send_message(peer, gpt_response)
-            else:
-                bot.messaging.send_message(peer, "🤔 Не совсем понял ваш вопрос. Попробуйте иначе или используйте /help")
+            bot.messaging.send_message(peer, "🤔 Не совсем понял ваш вопрос. Попробуйте иначе или используйте /help")
     except Exception as e:
         logging.error(f"Ошибка в text_handler: {e}")
+        bot.messaging.send_message(peer, "⚠️ Произошла ошибка при обработке сообщения.")
 
 def main():
     global bot
