@@ -15,6 +15,7 @@ from ai_agent import (
     find_agent_owners,
     generate_idea_suggestions,
     calculate_work_cost,
+    # Убираем импорт функций для команд памяти
 )
 
 # Загрузка конфигурации
@@ -127,12 +128,6 @@ def search_owners_handler(update: UpdateMessage):
         logging.error(f"Ошибка в search_owners_handler: {e}")
         bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
 
-def help_idea_handler(update: UpdateMessage):
-    peer = update.peer
-    user_id = peer.id
-    user_states[user_id] = {"mode": config['states']['help_with_ideas']}
-    bot.messaging.send_message(peer, config['bot_settings']['commands']['help_idea']['responses']['initial'])
-
 def consultation_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
@@ -141,6 +136,9 @@ def consultation_handler(update: UpdateMessage):
 
 def help_handler(update: UpdateMessage):
     bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
+
+# Функции для работы с памятью (только для внутреннего использования)
+# Память теперь работает автоматически без команд пользователя
 
 def process_template_idea(update: UpdateMessage, user_id: int):
     peer = update.peer
@@ -189,7 +187,10 @@ def text_handler(update: UpdateMessage, widget=None):
     peer = update.peer
     state = user_states.get(user_id, {"mode": config['states']['main_menu']})
 
-    # Спецрежимы
+    # Логирование для отладки
+    logging.info(f"[User {user_id}] Message: {text[:100]}...")  # Первые 100 символов
+
+    # Спецрежимы (остаются без изменений, но теперь с поддержкой памяти)
     if state["mode"] == config['states']['idea_choose_format']:
         if "шаблон" in text.lower():
             state["mode"] = config['states']['idea_template']
@@ -253,10 +254,13 @@ def text_handler(update: UpdateMessage, widget=None):
         user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    # Обычный диалог через GigaChat
+    # Обычный диалог через GigaChat с использованием памяти
     try:
+        logging.info(f"[User {user_id}] Sending to GigaChat with memory...")
         gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
+        
         if detected_command:
+            logging.info(f"[User {user_id}] Detected command: {detected_command}")
             # Выполняем только команду, без повторного текста от GPT
             if detected_command == "start":
                 start_handler(update)
@@ -266,19 +270,24 @@ def text_handler(update: UpdateMessage, widget=None):
                 search_owners_handler(update)
             elif detected_command == "idea":
                 idea_handler(update)
-            elif detected_command == "help_idea":
-                help_idea_handler(update)
             elif detected_command == "consultation":
                 consultation_handler(update)
             elif detected_command == "help":
                 help_handler(update)
         else:
             if gpt_response and gpt_response.strip():
+                # Отправляем ответ пользователю
                 bot.messaging.send_message(peer, gpt_response)
+                logging.info(f"[User {user_id}] Response sent successfully")
             else:
-                bot.messaging.send_message(peer, "🤔 Не совсем понял ваш вопрос. Попробуйте иначе или используйте /help")
+                fallback_msg = "🤔 Не совсем понял ваш вопрос. Попробуйте иначе или используйте /help"
+                bot.messaging.send_message(peer, fallback_msg)
+                logging.info(f"[User {user_id}] Fallback response sent")
+                
     except Exception as e:
-        logging.error(f"Ошибка в text_handler: {e}")
+        error_msg = f"⚠️ Произошла ошибка при обработке сообщения: {str(e)}"
+        logging.error(f"[User {user_id}] Error in text_handler: {e}")
+        bot.messaging.send_message(peer, error_msg)
 
 def main():
     global bot
@@ -287,17 +296,25 @@ def main():
         "token": BOT_TOKEN,
         "is_secure": config['bot_settings']['is_secure'],
     })
+    
     handlers = []
+    
+    # Основные команды из конфига
     for cmd, cmd_data in config['bot_settings']['commands'].items():
         handler_func = globals()[cmd_data['handler']]
         handlers.append(CommandHandler(handler_func, cmd))
         if 'aliases' in cmd_data:
             for alias in cmd_data['aliases']:
                 handlers.append(CommandHandler(handler_func, alias))
+    
     bot.messaging.command_handler(handlers)
     bot.messaging.message_handler([
         MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)
     ])
+    
+    logging.info("🤖 Бот запущен с поддержкой памяти диалогов!")
+    logging.info("🧠 GigaChat будет автоматически помнить последние 10 сообщений каждого пользователя")
+    
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 
 if __name__ == "__main__":
