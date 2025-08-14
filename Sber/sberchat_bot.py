@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 from dotenv import load_dotenv
 from dialog_bot_sdk.bot import DialogBot
 from dialog_bot_sdk.entities.messaging import UpdateMessage, MessageContentType
