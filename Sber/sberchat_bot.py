@@ -195,8 +195,6 @@ def process_template_idea(update: UpdateMessage, user_id: int):
                     logging.warning("Диаграмма не была создана")
             except Exception as diagram_error:
                 logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
-                # Продолжаем работу даже если диаграмма не создалась
-            # === КОНЕЦ НОВОГО КОДА ===
             
             bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
 
@@ -253,7 +251,6 @@ def text_handler(update: UpdateMessage, widget=None):
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
             cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
             
-            # === НОВЫЙ КОД: Генерация и отправка диаграммы для свободной формы ===
             try:
                 diagram_path = generate_idea_evaluation_diagram(user_data, is_unique, parsed_data)
                 if diagram_path and os.path.exists(diagram_path):
@@ -268,8 +265,6 @@ def text_handler(update: UpdateMessage, widget=None):
                     logging.warning("Диаграмма не была создана")
             except Exception as diagram_error:
                 logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
-                # Продолжаем работу даже если диаграмма не создалась
-            # === КОНЕЦ НОВОГО КОДА ===
             
             bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
             
