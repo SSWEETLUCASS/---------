@@ -15,6 +15,7 @@ from ai_agent import (
     find_agent_owners,
     generate_idea_suggestions,
     calculate_work_cost,
+    generate_idea_evaluation_diagram,  # НОВЫЙ ИМПОРТ
     # Убираем импорт функций для команд памяти
 )
 
@@ -56,6 +57,23 @@ def send_file(peer, file_path, text=None, name=None):
         return True
     except Exception as e:
         logging.error(f"❌ Ошибка отправки файла {file_path}: {e}")
+        return False
+
+# НОВАЯ ФУНКЦИЯ для отправки изображений
+def send_image(peer, image_path, caption=None):
+    """Отправка изображения через бота"""
+    try:
+        logging.info(f"📤 Отправка изображения: {image_path}")
+        with open(image_path, "rb") as f:
+            bot.messaging.send_file_sync(
+                peer,
+                f,
+                name=os.path.basename(image_path),
+                caption=caption or ""
+            )
+        return True
+    except Exception as e:
+        logging.error(f"❌ Ошибка отправки изображения {image_path}: {e}")
         return False
 
 def start_handler(update: UpdateMessage):
@@ -160,6 +178,25 @@ def process_template_idea(update: UpdateMessage, user_id: int):
             state["idea_data"]["user_id"] = user_id
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, state["idea_data"], is_free_form=False)
             cost_info = calculate_work_cost(state["idea_data"], is_unique)
+            
+            # === НОВЫЙ КОД: Генерация и отправка диаграммы ===
+            try:
+                diagram_path = generate_idea_evaluation_diagram(state["idea_data"], is_unique, parsed_data)
+                if diagram_path and os.path.exists(diagram_path):
+                    logging.info(f"📊 Отправка диаграммы оценки: {diagram_path}")
+                    send_image(peer, diagram_path, "📊 Диаграмма оценки идеи")
+                    try:
+                        os.remove(diagram_path)  # Удаляем временный файл
+                        logging.info(f"🗑️ Временный файл диаграммы удален: {diagram_path}")
+                    except Exception as cleanup_error:
+                        logging.warning(f"Не удалось удалить файл диаграммы: {cleanup_error}")
+                else:
+                    logging.warning("Диаграмма не была создана")
+            except Exception as diagram_error:
+                logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
+                # Продолжаем работу даже если диаграмма не создалась
+            # === КОНЕЦ НОВОГО КОДА ===
+            
             bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
 
             if state["idea_data"]:
@@ -214,7 +251,27 @@ def text_handler(update: UpdateMessage, widget=None):
             user_data = {"Описание в свободной форме": text, "user_id": user_id}
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
             cost_info = calculate_work_cost(parsed_data or user_data, is_unique)
+            
+            # === НОВЫЙ КОД: Генерация и отправка диаграммы для свободной формы ===
+            try:
+                diagram_path = generate_idea_evaluation_diagram(user_data, is_unique, parsed_data)
+                if diagram_path and os.path.exists(diagram_path):
+                    logging.info(f"📊 Отправка диаграммы оценки: {diagram_path}")
+                    send_image(peer, diagram_path, "📊 Диаграмма оценки идеи")
+                    try:
+                        os.remove(diagram_path)  # Удаляем временный файл
+                        logging.info(f"🗑️ Временный файл диаграммы удален: {diagram_path}")
+                    except Exception as cleanup_error:
+                        logging.warning(f"Не удалось удалить файл диаграммы: {cleanup_error}")
+                else:
+                    logging.warning("Диаграмма не была создана")
+            except Exception as diagram_error:
+                logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
+                # Продолжаем работу даже если диаграмма не создалась
+            # === КОНЕЦ НОВОГО КОДА ===
+            
             bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
+            
             if parsed_data:
                 word_path, excel_path = generate_files(parsed_data, cost_info)
                 bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
@@ -314,6 +371,7 @@ def main():
     
     logging.info("🤖 Бот запущен с поддержкой памяти диалогов!")
     logging.info("🧠 GigaChat будет автоматически помнить последние 10 сообщений каждого пользователя")
+    logging.info("📊 Включена поддержка диаграмм оценки идей!")  # НОВОЕ СООБЩЕНИЕ
     
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 

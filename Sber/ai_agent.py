@@ -10,6 +10,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import RGBColor
 from gigachat_wrapper import get_llm
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+import io
+from datetime import datetime
 import logging
 from collections import defaultdict, deque
 
@@ -317,7 +322,6 @@ def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple[
 
 Формат ответа:
 - Дружелюбный и естественный тон, можно использовать смайлики.
-- Если команда определена, пиши её в конце в виде: CMD:<название_команды>
 - Не используй /команд, только CMD:...
 
 Отвечай ТОЛЬКО на русском языке. Не более 4000 символов.
@@ -820,3 +824,114 @@ def _clear_user_memory(user_id: int) -> bool:
         gigachat_memory[user_id].clear()
         return True
     return False
+
+def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_data: dict = None) -> str:
+    """
+    Генерация паутинчатой диаграммы оценки идеи
+    Возвращает путь к сохраненному изображению
+    """
+    try:
+        from gigachat_wrapper import get_llm
+
+        # Подготавливаем текст для анализа
+        analysis_text = "\n".join([f"{k}: {v}" for k, v in (parsed_data or idea_data).items()])
+
+        # Промпт для оценки
+        evaluation_prompt = f"""
+        Проанализируй следующую идею AI-агента и оцени её по 6 критериям от 1 до 10:
+
+        Идея:
+        {analysis_text}
+
+        Критерии оценки:
+        1. Актуальность (насколько проблема востребована сейчас)
+        2. Сложность реализации (10 - очень сложно, 1 - очень просто)
+        3. ROI потенциал (возврат инвестиций, экономический эффект)
+        4. Инновационность (насколько идея новаторская)
+        5. Масштабируемость (возможность расширения и тиражирования)
+        6. Техническая осуществимость (реально ли это сделать с текущими технологиями)
+
+        Отвечай СТРОГО в формате:
+        Актуальность: X
+        Сложность: X
+        ROI: X
+        Инновационность: X
+        Масштабируемость: X
+        Осуществимость: X
+        """
+        # Получаем оценки
+        raw_response = get_llm().invoke(evaluation_prompt)
+        evaluation_text = clean_response_text(raw_response)
+
+        # Парсим
+        criteria = {
+            'Актуальность': 7,
+            'Сложность': 6,
+            'ROI': 6,
+            'Инновационность': 5,
+            'Масштабируемость': 6,
+            'Осуществимость': 7
+        }
+        scores = {}
+        for key in criteria.keys():
+            match = re.search(rf"{key}[:\-–]\s*(\d+)", evaluation_text, re.IGNORECASE)
+            scores[key] = min(max(int(match.group(1)), 1), 10) if match else criteria[key]
+
+        # Настройка шрифтов для кириллицы
+        plt.rcParams['font.family'] = ['DejaVu Sans', 'Arial', 'sans-serif']
+        plt.rcParams['axes.unicode_minus'] = False
+
+        # === Построение паутинки ===
+        categories = list(scores.keys())
+        values = list(scores.values())
+        values += values[:1]  # замкнуть график
+
+        angles = [n / float(len(categories)) * 2 * np.pi for n in range(len(categories))]
+        angles += angles[:1]
+
+        fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+        fig.suptitle(f'📊 Оценка AI-инициативы: {parsed_data.get("Название", "Новая идея")}', 
+                     fontsize=16, fontweight='bold', y=0.98)
+
+        ax.set_theta_offset(np.pi / 2)
+        ax.set_theta_direction(-1)
+
+        ax.plot(angles, values, 'o-', linewidth=2, label='Оценка', color='#2E86C1')
+        ax.fill(angles, values, alpha=0.25, color='#2E86C1')
+
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(categories, fontsize=10)
+        ax.set_ylim(0, 10)
+        ax.set_yticks([2, 4, 6, 8, 10])
+        ax.set_yticklabels(['2', '4', '6', '8', '10'], fontsize=8)
+        ax.grid(True)
+
+        # Средняя оценка и статус
+        avg_score = sum(scores.values()) / len(scores)
+        if avg_score >= 7:
+            status = "🟢 РЕКОМЕНДУЕТСЯ"
+            status_color = '#27AE60'
+        elif avg_score >= 5:
+            status = "🟡 ДОРАБОТАТЬ"
+            status_color = '#F39C12'
+        else:
+            status = "🔴 РИСКИ"
+            status_color = '#E74C3C'
+
+        uniqueness_text = "✅ Уникальная" if is_unique else "⚠️ Есть аналоги"
+        info_text = f"Общая: {avg_score:.1f}/10  •  {status}  •  {uniqueness_text}"
+
+        fig.text(0.5, 0.05, info_text, ha='center', fontsize=11,
+                 bbox=dict(boxstyle="round,pad=0.5", facecolor=status_color, alpha=0.2))
+
+        # Сохранение
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"idea_radar_{timestamp}.png"
+        plt.savefig(filename, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+
+        return filename
+
+    except Exception as e:
+        logging.error(f"⚠️ Ошибка при создании диаграммы: {e}")
+        return None
