@@ -315,36 +315,44 @@ def text_handler(update: UpdateMessage, widget=None):
     try:
         logging.info(f"[User {user_id}] Sending to GigaChat with memory...")
         gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
-        
+
+        # Если в самом тексте GPT есть команда, но detected_command пуст
+        if not detected_command and gpt_response:
+            cmd_match = re.search(r"CMD:(\w+)", gpt_response, re.IGNORECASE)
+            if cmd_match:
+                detected_command = cmd_match.group(1).lower().strip()
+                logging.info(f"[User {user_id}] Extracted command from GPT text: {detected_command}")
+
         if detected_command:
             logging.info(f"[User {user_id}] Detected command: {detected_command}")
             # Выполняем только команду, без повторного текста от GPT
-            if detected_command == "start":
-                start_handler(update)
-            elif detected_command == "ai_agent":
-                agent_handler(update)
-            elif detected_command == "search_owners":
-                search_owners_handler(update)
-            elif detected_command == "idea":
-                idea_handler(update)
-            elif detected_command == "consultation":
-                consultation_handler(update)
-            elif detected_command == "help":
-                help_handler(update)
+            command_map = {
+                "start": start_handler,
+                "ai_agent": agent_handler,
+                "search_owners": search_owners_handler,
+                "idea": idea_handler,
+                "consultation": consultation_handler,
+                "help": help_handler
+            }
+            handler = command_map.get(detected_command)
+            if handler:
+                handler(update)
+            else:
+                logging.warning(f"[User {user_id}] No handler found for command: {detected_command}")
         else:
             if gpt_response and gpt_response.strip():
-                # Отправляем ответ пользователю
                 bot.messaging.send_message(peer, gpt_response)
                 logging.info(f"[User {user_id}] Response sent successfully")
             else:
                 fallback_msg = "🤔 Не совсем понял ваш вопрос. Попробуйте иначе или используйте /help"
                 bot.messaging.send_message(peer, fallback_msg)
                 logging.info(f"[User {user_id}] Fallback response sent")
-                
+
     except Exception as e:
         error_msg = f"⚠️ Произошла ошибка при обработке сообщения: {str(e)}"
         logging.error(f"[User {user_id}] Error in text_handler: {e}")
         bot.messaging.send_message(peer, error_msg)
+
 
 def main():
     global bot
