@@ -16,10 +16,11 @@ from ai_agent import (
     find_agent_owners,
     generate_idea_suggestions,
     calculate_work_cost_interactive,
-    generate_idea_evaluation_diagram,
-    handle_cost_calculation_flow,  # НОВЫЙ ИМПОРТ
+    generate_idea_evaluation_diagram,  # НОВЫЙ ИМПОРТ
     # Убираем импорт функций для команд памяти
 )
+
+user_states = {} 
 
 # Загрузка конфигурации
 with open('config.json', 'r', encoding='utf-8') as f:
@@ -77,6 +78,40 @@ def send_image(peer, image_path, caption=None):
     except Exception as e:
         logging.error(f"❌ Ошибка отправки изображения {image_path}: {e}")
         return False
+
+def handle_interactive_cost_calc(user_id, peer, message_text):
+    """Обработка интерактивного расчёта стоимости через calculate_work_cost_interactive"""
+    from ai_agent import calculate_work_cost_interactive
+
+    state = user_states.get(user_id)
+    if not state:
+        state = {"mode": "cost_calc", "answers": {}, "step": 0}
+        user_states[user_id] = state
+
+    # Если это не первый шаг — сохраняем предыдущий ответ
+    if state["step"] > 0:
+        last_key = list(state["answers"].keys())[-1]
+        state["answers"][last_key] = message_text.strip()
+
+    # Получаем следующий вопрос или результат
+    next_data = calculate_work_cost_interactive(state["answers"], return_next=True)
+
+    if isinstance(next_data, dict) and next_data.get("done"):
+        # Завершили — отправляем результат
+        bot.messaging.send_message(peer, f"💰 Расчёт завершён:\n{next_data['result']}")
+        user_states.pop(user_id, None)
+    else:
+        # Продолжаем опрос
+        question = next_data.get("question")
+        key = next_data.get("key")
+        if question and key:
+            state["answers"][key] = None
+            state["step"] += 1
+            bot.messaging.send_message(peer, question)
+        else:
+            bot.messaging.send_message(peer, "⚠️ Ошибка при генерации следующего вопроса.")
+            user_states.pop(user_id, None)
+
 
 def start_handler(update: UpdateMessage):
     user_id = update.peer.id
@@ -226,40 +261,9 @@ def text_handler(update: UpdateMessage, widget=None):
 
     # Логирование для отладки
     logging.info(f"[User {user_id}] Message: {text[:100]}...")  # Первые 100 символов
-
-    if state.get("mode") == config['states']['cost_calculation']:
-        # Получаем данные инициативы из состояния пользователя
-        idea_data = state.get("idea_data", {})
-        # Получаем текущее состояние расчета стоимости
-        cost_state = state.get("cost_calculation_state", {})
-        
-        response, updated_cost_state = handle_cost_calculation_flow(text, idea_data, user_id)
-        
-        # Обновляем состояние пользователя
-        state['cost_calculation_state'] = updated_cost_state
-        
-        # Если расчет завершен, выходим из режима
-        if updated_cost_state.get('stage') == 'completed':
-            state["mode"] = config['states']['main_menu']
-            
-            # Отправляем финальный результат и файлы, если нужно
-            bot.messaging.send_message(peer, response)
-            
-            # Генерируем и отправляем файлы с финальным расчетом
-            word_path, excel_path = generate_files(idea_data, response)
-            bot.messaging.send_message(peer, "✅ Расчет стоимости завершен. Вот файлы с деталями:")
-            send_file(peer, word_path, text="📄 Техническое описание с расчетом")
-            send_file(peer, excel_path, text="📊 Структурированные данные с расчетом")
-            try:
-                os.remove(word_path)
-                os.remove(excel_path)
-            except:
-                pass
-            
-        else:
-            bot.messaging.send_message(peer, response)
-            
-        return
+    if user_id in user_states and user_states[user_id].get("mode") == "cost_calc":
+            handle_interactive_cost_calc(user_id, peer, text)
+            return
 
     # Спецрежимы (остаются без изменений, но теперь с поддержкой памяти)
     if state["mode"] == config['states']['idea_choose_format']:
@@ -276,20 +280,6 @@ def text_handler(update: UpdateMessage, widget=None):
         return
 
     elif state["mode"] == config['states']['idea_template']:
-        user_data_for_cost = state["idea_data"] # Или parsed_data, если есть
-        cost_response, cost_state_data = handle_cost_calculation_flow(
-            user_input="",  # Пустой ввод для первого вызова
-            user_data=user_data_for_cost,
-            user_id=user_id
-        )
-        
-        # Устанавливаем новый режим и сохраняем состояние расчета
-        state["mode"] = config['states']['cost_calculation']
-        state["cost_calculation_state"] = cost_state_data
-        
-        # Отправляем результаты анализа и первые вопросы
-        bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}")
-        bot.messaging.send_message(peer, cost_response)
         process_template_idea(update, user_id)
         return
 
@@ -299,20 +289,9 @@ def text_handler(update: UpdateMessage, widget=None):
             user_data = {"Описание в свободной форме": text, "user_id": user_id}
             response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
             cost_info = calculate_work_cost_interactive(parsed_data or user_data, is_unique)
-            user_data_for_cost = parsed_data or user_data
-            cost_response, cost_state_data = handle_cost_calculation_flow(
-                user_input="", # Пустой ввод для первого вызова
-                user_data=user_data_for_cost,
-                user_id=user_id
-            )
-            
-            # Устанавливаем новый режим и сохраняем состояние расчета
-            state["mode"] = config['states']['cost_calculation']
-            state["cost_calculation_state"] = cost_state_data
-            
-            # Отправляем результаты анализа и первые вопросы
-            bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}")
-            bot.messaging.send_message(peer, cost_response)
+            if user_id in user_states and user_states[user_id].get("mode") == "cost_calc":
+                handle_interactive_cost_calc(user_id, peer, text)
+                return
             
             try:
                 diagram_path = generate_idea_evaluation_diagram(user_data, is_unique, parsed_data)
@@ -369,6 +348,11 @@ def text_handler(update: UpdateMessage, widget=None):
             bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
         user_states[user_id] = {"mode": config['states']['main_menu']}
         return
+    elif detected_command == "idea_free_form":
+        user_states[user_id] = {"mode": "cost_calc", "answers": {}, "step": 0}
+        bot.messaging.send_message(peer, "Давайте уточним детали вашей идеи! Начнём с первого вопроса:")
+        handle_interactive_cost_calc(user_id, peer, "")
+
 
     # Обычный диалог через GigaChat с использованием памяти
     try:
