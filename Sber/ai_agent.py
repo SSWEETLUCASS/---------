@@ -279,7 +279,7 @@ def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_for
                         break
             if is_unique and parsed_data:
                 try:
-                    cost = calculate_work_cost(parsed_data)
+                    cost = calculate_work_cost_interactive(parsed_data)
                     response_text += f"\n\n💰 Примерная стоимость работы: {cost:,.0f} ₽"
                 except Exception as e:
                     logging.error(f"Ошибка при расчете стоимости: {e}")
