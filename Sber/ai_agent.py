@@ -17,6 +17,8 @@ import io
 from datetime import datetime
 import logging
 from collections import defaultdict, deque
+import json
+
 
 # Настройка логирования
 logging.basicConfig(
@@ -1171,6 +1173,14 @@ def _clear_user_memory(user_id: int) -> bool:
         return True
     return False
 
+def safe_str(value):
+    """Универсальное преобразование значений в строку"""
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        return ", ".join(map(str, value))
+    return str(value)
+
 def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_data: dict = None) -> str:
     """
     Генерация паутинчатой диаграммы оценки идеи
@@ -1180,7 +1190,9 @@ def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_da
         from gigachat_wrapper import get_llm
 
         # Подготавливаем текст для анализа
-        analysis_text = "\n".join([f"{k}: {v}" for k, v in (parsed_data or idea_data).items()])
+        analysis_text = "\n".join(
+            [f"{k}: {safe_str(v)}" for k, v in (parsed_data or idea_data).items()]
+        )
 
         # Промпт для оценки
         evaluation_prompt = f"""
@@ -1236,8 +1248,10 @@ def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_da
         angles += angles[:1]
 
         fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
-        fig.suptitle(f'📊 Оценка AI-инициативы: {parsed_data.get("Название", "Новая идея")}', 
-                     fontsize=16, fontweight='bold', y=0.98)
+        fig.suptitle(
+            f'📊 Оценка AI-инициативы: {safe_str((parsed_data or idea_data).get("Название", "Новая идея"))}', 
+            fontsize=16, fontweight='bold', y=0.98
+        )
 
         ax.set_theta_offset(np.pi / 2)
         ax.set_theta_direction(-1)
@@ -1267,8 +1281,10 @@ def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_da
         uniqueness_text = "✅ Уникальная" if is_unique else "⚠️ Есть аналоги"
         info_text = f"Общая: {avg_score:.1f}/10  •  {status}  •  {uniqueness_text}"
 
-        fig.text(0.5, 0.05, info_text, ha='center', fontsize=11,
-                 bbox=dict(boxstyle="round,pad=0.5", facecolor=status_color, alpha=0.2))
+        fig.text(
+            0.5, 0.05, info_text, ha='center', fontsize=11,
+            bbox=dict(boxstyle="round,pad=0.5", facecolor=status_color, alpha=0.2)
+        )
 
         # Сохранение
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
