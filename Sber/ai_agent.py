@@ -1250,184 +1250,429 @@ class CostCalculationManager:
                 'start_time': datetime.now().isoformat()
             }
             return response, cost_state
-
-    
-        # Если пользователь отвечает на вопросы
+        
+        # Обработка ответов на вопросы
         if cost_state.get('stage') == 'questions':
             questions = cost_state.get('questions', {})
             
-            # Проверяем, хочет ли пользователь принудительно рассчитать
-            if 'рассчитать' in user_input.lower() or 'посчитать' in user_input.lower():
-                # Собираем уже данные ответы
-                answers = {k: v['answer'] for k, v in questions.items() if v['answered']}
+            # Проверяем принудительный расчет
+            if any(word in user_input.lower() for word in ['рассчитать', 'посчитать', 'расчет']):
+                answers = {k: v['answer'] for k, v in questions.items() if v.get('answered')}
                 if answers:
-                    final_cost, _ = calculate_final_cost(user_data, answers, user_id)
+                    final_cost, _ = self.calculate_final_cost(user_data, answers, user_id)
                     cost_state = {'stage': 'completed'}
                     return final_cost, cost_state
                 else:
-                    return "❌ Нет ни одного ответа для расчета. Пожалуйста, ответьте хотя бы на несколько вопросов.", cost_state
+                    return "❌ Нет ответов для расчета. Ответьте хотя бы на несколько вопросов.", cost_state
             
             # Обрабатываем ответы
-            updated_questions, all_answered, status_msg = process_cost_answers(questions, user_input)
+            updated_questions, all_answered, status_msg = self.process_cost_answers(questions, user_input)
             cost_state['questions'] = updated_questions
             
             if all_answered:
-                # Все ответы получены, делаем финальный расчет
                 answers = {k: v['answer'] for k, v in updated_questions.items()}
-                final_cost, _ = calculate_final_cost(user_data, answers, user_id)
+                final_cost, _ = self.calculate_final_cost(user_data, answers, user_id)
                 cost_state = {'stage': 'completed'}
                 return final_cost, cost_state
             else:
                 return status_msg, cost_state
-
-        # Если расчет уже завершен
+        
+        # Расчет завершен
         if cost_state.get('stage') == 'completed':
-            return "✅ Расчет стоимости уже завершен. Если нужен новый расчет, создайте новую инициативу.", cost_state
-
+            return "✅ Расчет стоимости завершен. Для нового расчета создайте новую инициативу.", cost_state
+        
         return "⚠️ Неизвестное состояние расчета.", cost_state
-    
-    def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_data: dict = None) -> str:
-        """
-        Генерация паутинчатой диаграммы оценки идеи
-        Возвращает путь к сохраненному изображению
-        """
-        try:
-            from gigachat_wrapper import get_llm
 
-            # Подготавливаем текст для анализа
-            analysis_text = "\n".join(
-                [f"{k}: {safe_str(v)}" for k, v in (parsed_data or idea_data).items()]
+    def _parse_questions_from_text(self, text: str) -> Dict[str, Dict]:
+        """Парсинг вопросов из текста в структурированный словарь"""
+        questions = {}
+        
+        question_pattern = r'ВОПРОС\s*(\d+):\s*(.+?)(?=\n|Варианты:|$)'
+        variants_pattern = r'Варианты:\s*(.+?)(?=\n\s*ВОПРОС|\n\s*$|$)'
+        
+        question_matches = re.findall(question_pattern, text, re.DOTALL | re.IGNORECASE)
+        
+        for match in question_matches:
+            question_num = match[0]
+            question_text = match[1].strip()
+            
+            # Ищем варианты для этого вопроса
+            question_block = re.search(
+                rf'ВОПРОС\s*{question_num}:.*?(?=ВОПРОС\s*\d+:|$)', 
+                text, re.DOTALL | re.IGNORECASE
             )
-
-            # Промпт для оценки
-            evaluation_prompt = f"""
-            Проанализируй следующую идею AI-агента и оцени её по 6 критериям от 1 до 10:
-
-            Идея:
-            {analysis_text}
-
-            Критерии оценки:
-            1. Актуальность (насколько проблема востребована сейчас)
-            2. Сложность реализации (10 - очень сложно, 1 - очень просто)
-            3. ROI потенциал (возврат инвестиций, экономический эффект)
-            4. Инновационность (насколько идея новаторская)
-            5. Масштабируемость (возможность расширения и тиражирования)
-            6. Техническая осуществимость (реально ли это сделать с текущими технологиями)
-
-            Отвечай СТРОГО в формате:
-            Актуальность: X
-            Сложность: X
-            ROI: X
-            Инновационность: X
-            Масштабируемость: X
-            Осуществимость: X
-            """
-            # Получаем оценки
-            raw_response = get_llm().invoke(evaluation_prompt)
-            evaluation_text = clean_response_text(raw_response)
-
-            # Парсим
-            criteria = {
-                'Актуальность': 7,
-                'Сложность': 6,
-                'ROI': 6,
-                'Инновационность': 5,
-                'Масштабируемость': 6,
-                'Осуществимость': 7
+            
+            variants = []
+            if question_block:
+                variants_match = re.search(variants_pattern, question_block.group(), re.DOTALL | re.IGNORECASE)
+                if variants_match:
+                    variants_text = variants_match.group(1).strip()
+                    variants = [v.strip() for v in variants_text.split(',') if v.strip()]
+            
+            questions[question_num] = {
+                'question': question_text,
+                'variants': variants,
+                'answered': False,
+                'answer': None
             }
-            scores = {}
-            for key in criteria.keys():
-                match = re.search(rf"{key}[:\-–]\s*(\d+)", evaluation_text, re.IGNORECASE)
-                scores[key] = min(max(int(match.group(1)), 1), 10) if match else criteria[key]
+        
+        return questions
 
-            # Настройка шрифтов для кириллицы
-            plt.rcParams['font.family'] = ['DejaVu Sans', 'Arial', 'sans-serif']
-            plt.rcParams['axes.unicode_minus'] = False
+class AIAgentBot:
+    """Основной класс бота для работы с AI-агентами"""
+    
+    def __init__(self):
+        self.gigachat = GigaChatProcessor()
+        self.cost_manager = CostCalculationManager()
+        self.file_generator = FileGenerator()
+        self.diagram_generator = DiagramGenerator()
+        self.memory_manager = MemoryManager()
 
-            # === Построение паутинки ===
-            categories = list(scores.keys())
-            values = list(scores.values())
-            values += values[:1]  # замкнуть график
-
-            angles = [n / float(len(categories)) * 2 * np.pi for n in range(len(categories))]
-            angles += angles[:1]
-
-            fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
-            fig.suptitle(
-                f'📊 Оценка AI-инициативы: {safe_str((parsed_data or idea_data).get("Название", "Новая идея"))}', 
-                fontsize=16, fontweight='bold', y=0.98
-            )
-
-            ax.set_theta_offset(np.pi / 2)
-            ax.set_theta_direction(-1)
-
-            ax.plot(angles, values, 'o-', linewidth=2, label='Оценка', color='#2E86C1')
-            ax.fill(angles, values, alpha=0.25, color='#2E86C1')
-
-            ax.set_xticks(angles[:-1])
-            ax.set_xticklabels(categories, fontsize=10)
-            ax.set_ylim(0, 10)
-            ax.set_yticks([2, 4, 6, 8, 10])
-            ax.set_yticklabels(['2', '4', '6', '8', '10'], fontsize=8)
-            ax.grid(True)
-
-            # Средняя оценка и статус
-            avg_score = sum(scores.values()) / len(scores)
-            if avg_score >= 7:
-                status = "🟢 РЕКОМЕНДУЕТСЯ"
-                status_color = '#27AE60'
-            elif avg_score >= 5:
-                status = "🟡 ДОРАБОТАТЬ"
-                status_color = '#F39C12'
-            else:
-                status = "🔴 РИСКИ"
-                status_color = '#E74C3C'
-
-            uniqueness_text = "✅ Уникальная" if is_unique else "⚠️ Есть аналоги"
-            info_text = f"Общая: {avg_score:.1f}/10  •  {status}  •  {uniqueness_text}"
-
-            fig.text(
-                0.5, 0.05, info_text, ha='center', fontsize=11,
-                bbox=dict(boxstyle="round,pad=0.5", facecolor=status_color, alpha=0.2)
-            )
-
-            # Сохранение
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"idea_radar_{timestamp}.png"
-            plt.savefig(filename, dpi=150, bbox_inches='tight', facecolor='white')
-            plt.close()
-
-            return filename
-
+    def process_user_message(self, message: str, user_id: Optional[int] = None, 
+                           context: Optional[Dict] = None) -> Dict[str, Any]:
+        """Главный метод обработки сообщений пользователя"""
+        try:
+            # Проверяем тип сообщения
+            response, command = self.gigachat.check_general_message(message, user_id)
+            
+            result = {
+                'response': response,
+                'command': command,
+                'files': [],
+                'diagram': None,
+                'success': True
+            }
+            
+            # Обрабатываем команды
+            if command:
+                result.update(self._handle_command(command, message, user_id, context))
+            
+            return result
+            
         except Exception as e:
-            logging.error(f"⚠️ Ошибка при создании диаграммы: {e}")
+            logging.error(f"Ошибка в обработке сообщения: {e}")
+            return {
+                'response': f"⚠️ Произошла ошибка при обработке сообщения: {e}",
+                'command': None,
+                'files': [],
+                'diagram': None,
+                'success': False
+            }
+
+    def process_idea(self, user_data: Dict[str, Any], is_free_form: bool = False, 
+                    user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Обработка идеи пользователя"""
+        try:
+            user_input = user_data.get('Описание в свободной форме', '') if is_free_form else str(user_data)
+            
+            # Анализируем идею
+            response, is_unique, parsed_data, suggest_processing = self.gigachat.check_idea_with_gigachat(
+                user_input, user_data, is_free_form
+            )
+            
+            result = {
+                'response': response,
+                'is_unique': is_unique,
+                'parsed_data': parsed_data,
+                'suggest_processing': suggest_processing,
+                'files': [],
+                'diagram': None,
+                'success': True
+            }
+            
+            # Если идея валидна, создаем файлы и диаграмму
+            if is_unique and (parsed_data or not is_free_form):
+                data_for_files = parsed_data if parsed_data else user_data
+                
+                # Генерируем файлы
+                try:
+                    word_file, excel_file = self.file_generator.generate_files(data_for_files)
+                    result['files'] = [word_file, excel_file]
+                except Exception as e:
+                    logging.error(f"Ошибка при создании файлов: {e}")
+                
+                # Генерируем диаграмму
+                try:
+                    diagram_file = self.diagram_generator.generate_idea_evaluation_diagram(
+                        user_data, is_unique, parsed_data
+                    )
+                    if diagram_file:
+                        result['diagram'] = diagram_file
+                except Exception as e:
+                    logging.error(f"Ошибка при создании диаграммы: {e}")
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Ошибка в обработке идеи: {e}")
+            return {
+                'response': f"⚠️ Ошибка при обработке идеи: {e}",
+                'is_unique': False,
+                'parsed_data': {},
+                'suggest_processing': False,
+                'files': [],
+                'diagram': None,
+                'success': False
+            }
+
+    def generate_idea_suggestions(self, user_request: str) -> str:
+        """Генерация предложений идей"""
+        try:
+            agents_data = AgentDataProcessor.load_agents_data()
+            
+            existing_agents_context = ""
+            if agents_data:
+                agent_types = set(agent['type'] for agent in agents_data if agent['type'])
+                existing_agents_context = f"Существующие типы агентов: {', '.join(agent_types)}"
+
+            prompt = f"""
+            Запрос пользователя: "{user_request}"
+            {existing_agents_context}
+
+            Сгенерируй 3-4 конкретные идеи для AI-агентов, которые могли бы помочь пользователю.
+            
+            Для каждой идеи предложи:
+            - Название агента
+            - Краткое описание (1-2 предложения)
+            - Основные функции
+            - Примерные преимущества
+            
+            Старайся предлагать разнообразные решения и избегай повторения существующих агентов.
+            
+            Отвечай ТОЛЬКО на русском языке, используй смайлики для наглядности.
+            """
+            
+            logging.info(f"[GigaChat Ideas] Generating suggestions for: {user_request}")
+            raw_response = get_llm().invoke(prompt)
+            
+            response = TextProcessor.clean_response_text(raw_response)
+            return response if response else "💡 Не удалось сгенерировать идеи. Попробуйте переформулировать запрос."
+            
+        except Exception as e:
+            logging.error(f"Ошибка при генерации идей: {e}")
+            return f"⚠️ Ошибка при генерации идей: {e}"
+
+    def get_agents_summary(self) -> Optional[str]:
+        """Создание сводного файла по агентам"""
+        try:
+            return self.file_generator.generate_agents_summary_file("agents.xlsx")
+        except Exception as e:
+            logging.error(f"Ошибка при создании сводки агентов: {e}")
             return None
 
-# Функции для внутренней работы с памятью (не показываем пользователю)
-    def _get_memory_summary(user_id: int) -> str:
-        """Внутренняя функция для получения сводки по памяти пользователя"""
-        if not user_id or user_id not in gigachat_memory:
-            return "Память пуста"
+    def clear_user_memory(self, user_id: int) -> bool:
+        """Очистка памяти пользователя"""
+        return self.memory_manager.clear_user_memory(user_id)
+
+    def get_memory_info(self, user_id: int) -> str:
+        """Получение информации о памяти пользователя"""
+        return self.memory_manager.get_memory_summary(user_id)
+
+    def _handle_command(self, command: str, message: str, user_id: Optional[int], 
+                       context: Optional[Dict]) -> Dict[str, Any]:
+        """Обработка команд"""
+        result = {}
         
-        history = list(gigachat_memory[user_id])
-        if not history:
-            return "История диалога пуста"
+        if command == 'start':
+            result['response'] = self._get_start_message()
+            
+        elif command == 'help':
+            result['response'] = self._get_help_message()
+            
+        elif command == 'ai_agent':
+            summary_file = self.get_agents_summary()
+            if summary_file:
+                result['files'] = [summary_file]
+                result['response'] += f"\n\n📊 Создан аналитический файл: {summary_file}"
+            
+        elif command == 'search_owners':
+            result['response'] = self.gigachat.find_agent_owners(message)
+            
+        elif command == 'consultation':
+            result['response'] = self.generate_idea_suggestions(message)
+            
+        elif command == 'idea':
+            # Этот случай должен обрабатываться отдельно через process_idea
+            result['response'] = "💡 Для обработки идеи используйте метод process_idea"
         
-        return f"В памяти {len(history)} обменов сообщениями. Последнее: {history[-1]['timestamp']}"
+        return result
 
-    def _clear_user_memory(user_id: int) -> bool:
-        """Внутренняя функция для очистки памяти пользователя"""
-        if user_id in gigachat_memory:
-            gigachat_memory[user_id].clear()
-            return True
-        return False
+    def _get_start_message(self) -> str:
+        """Приветственное сообщение"""
+        return """
+🤖 **Добро пожаловать в Агентолог!**
 
-    def safe_str(value):
-        """Универсальное преобразование значений в строку"""
-        if isinstance(value, dict):
-            return json.dumps(value, ensure_ascii=False)
-        if isinstance(value, list):
-            return ", ".join(map(str, value))
-        return str(value)
+Я помогу вам с разработкой AI-агентов:
 
+💡 **Что я умею:**
+• Анализировать идеи для AI-агентов
+• Проверять уникальность инициатив
+• Рассчитывать стоимость разработки
+• Создавать документацию и отчеты
+• Искать существующих агентов и их владельцев
+• Предлагать новые идеи для автоматизации
+
+📝 **Как начать:**
+• Опишите вашу идею в свободной форме
+• Или заполните структурированную форму
+• Спросите про существующих агентов
+• Попросите помочь с идеей
+
+🚀 **Готов помочь! Расскажите, что хотите автоматизировать?**
+        """
+
+    def _get_help_message(self) -> str:
+        """Сообщение с помощью"""
+        return """
+🆘 **Справка по использованию Агентолога**
+
+📋 **Основные функции:**
+
+1️⃣ **Анализ идей:**
+   • Опишите идею в свободной форме
+   • Я проанализирую уникальность
+   • Создам документацию и диаграмму оценки
+
+2️⃣ **Поиск агентов:**
+   • "Найди агентов для работы с документами"
+   • "Кто занимается аналитикой?"
+
+3️⃣ **Генерация идей:**
+   • "Придумай идеи для HR"
+   • "Что можно автоматизировать в продажах?"
+
+4️⃣ **Расчет стоимости:**
+   • Автоматически для уникальных идей
+   • Детальный расчет по вопросам
+
+5️⃣ **Получение отчетов:**
+   • "Покажи всех агентов" - создам Excel с аналитикой
+
+❓ **Проблемы:**
+• Перезапустите бота
+• Проверьте формат ввода
+• Используйте простые фразы
+
+💬 **Пишите как обычно, я пойму!**
+        """
+
+# Вспомогательные функции для обратной совместимости
+def check_idea_with_gigachat_local(user_input: str, user_data: dict, is_free_form: bool = False) -> tuple:
+    """Обратная совместимость"""
+    bot = AIAgentBot()
+    return bot.gigachat.check_idea_with_gigachat(user_input, user_data, is_free_form)
+
+def check_general_message_with_gigachat(msg: str, user_id: int = None) -> tuple:
+    """Обратная совместимость"""
+    bot = AIAgentBot()
+    return bot.gigachat.check_general_message(msg, user_id)
+
+def find_agent_owners(query: str) -> str:
+    """Обратная совместимость"""
+    bot = AIAgentBot()
+    return bot.gigachat.find_agent_owners(query)
+
+def generate_idea_suggestions(user_request: str) -> str:
+    """Обратная совместимость"""
+    bot = AIAgentBot()
+    return bot.generate_idea_suggestions(user_request)
+
+def generate_agents_summary_file(agents_file_path: str) -> str:
+    """Обратная совместимость"""
+    bot = AIAgentBot()
+    return bot.get_agents_summary()
+
+def generate_files(data: dict, cost_info: str = "") -> tuple:
+    """Обратная совместимость"""
+    file_gen = FileGenerator()
+    return file_gen.generate_files(data, cost_info)
+
+def calculate_work_cost(parsed_data: dict, is_unique: bool = True) -> str:
+    """Обратная совместимость"""
+    calculator = CostCalculator()
+    return calculator.calculate_work_cost(parsed_data, is_unique)
+
+def calculate_work_cost_interactive(answers: dict, return_next: bool = False):
+    """Обратная совместимость"""
+    calculator = CostCalculator()
+    return calculator.calculate_work_cost_interactive(answers, return_next)
+
+def generate_cost_questions(parsed_data: dict) -> tuple:
+    """Обратная совместимость"""
+    cost_manager = CostCalculationManager()
+    return cost_manager.generate_cost_questions(parsed_data)
+
+def calculate_final_cost(parsed_data: dict, answers: dict, user_id: int = None) -> tuple:
+    """Обратная совместимость"""
+    cost_manager = CostCalculationManager()
+    return cost_manager.calculate_final_cost(parsed_data, answers, user_id)
+
+def process_cost_answers(questions: dict, user_input: str) -> tuple:
+    """Обратная совместимость"""
+    cost_manager = CostCalculationManager()
+    return cost_manager.process_cost_answers(questions, user_input)
+
+def handle_cost_calculation_flow(user_input: str, user_data: dict, user_id: int = None) -> tuple:
+    """Обратная совместимость"""
+    cost_manager = CostCalculationManager()
+    return cost_manager.handle_cost_calculation_flow(user_input, user_data, user_id)
+
+def generate_idea_evaluation_diagram(idea_data: dict, is_unique: bool, parsed_data: dict = None) -> str:
+    """Обратная совместимость"""
+    diagram_gen = DiagramGenerator()
+    return diagram_gen.generate_idea_evaluation_diagram(idea_data, is_unique, parsed_data)
+
+# Функции управления памятью для обратной совместимости
+def add_to_memory(user_id: int, user_message: str, bot_response: str):
+    """Обратная совместимость"""
+    MemoryManager.add_to_memory(user_id, user_message, bot_response)
+
+def get_conversation_context(user_id: int) -> str:
+    """Обратная совместимость"""
+    return MemoryManager.get_conversation_context(user_id)
+
+def clean_response_text(text: str) -> str:
+    """Обратная совместимость"""
+    return TextProcessor.clean_response_text(text)
+
+def load_agents_data() -> list:
+    """Обратная совместимость"""
+    return AgentDataProcessor.load_agents_data()
+
+def safe_str(value):
+    """Обратная совместимость"""
+    return TextProcessor.safe_str(value)
+
+# Основной класс для использования
+__all__ = [
+    'AIAgentBot',
+    'GigaChatProcessor', 
+    'CostCalculator',
+    'FileGenerator',
+    'DiagramGenerator',
+    'MemoryManager',
+    'TextProcessor',
+    'AgentDataProcessor',
+    'CostCalculationManager'
+]
+
+if __name__ == "__main__":
+    # Пример использования
+    bot = AIAgentBot()
     
+    # Тестовое сообщение
+    result = bot.process_user_message("Привет, что ты умеешь?", user_id=123)
+    print("Ответ бота:", result['response'])
+    
+    # Тестовая идея
+    test_idea = {
+        "Название": "Агент для обработки заявок",
+        "Что хотим улучшить?": "Автоматизировать обработку входящих заявок",
+        "Масштаб процесса": "средний"
+    }
+    
+    idea_result = bot.process_idea(test_idea, user_id=123)
+    print("Анализ идеи:", idea_result['response'])
+    print("Уникальна:", idea_result['is_unique'])
+    print("Файлы:", idea_result['files'])
+    print("Диаграмма:", idea_result['diagram'])

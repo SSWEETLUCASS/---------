@@ -17,11 +17,10 @@ from ai_agent import (
     generate_idea_suggestions,
     calculate_work_cost_interactive,
     generate_idea_evaluation_diagram,
-    # НОВЫЕ ИМПОРТЫ для системы уточнений
+    # Импорты для системы уточнений
     generate_cost_questions,
     process_cost_answers,
     calculate_final_cost,
-    handle_cost_calculation_flow,
 )
 
 # Загрузка конфигурации
@@ -88,9 +87,12 @@ def start_handler(update: UpdateMessage):
 def idea_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
-    if user_id in user_states and user_states[user_id].get("mode", "").startswith("idea_"):
+    # Проверяем, не находится ли пользователь уже в процессе
+    current_state = user_states.get(user_id, {})
+    if current_state.get("mode", "").startswith("idea_") or current_state.get("mode") in ["cost_questions", "awaiting_detailed_cost_decision"]:
         bot.messaging.send_message(peer, config['error_messages']['already_in_process'])
         return
+    
     user_states[user_id] = {
         "mode": config['states']['idea_choose_format'],
         "current_field": 0,
@@ -153,8 +155,8 @@ def search_owners_handler(update: UpdateMessage):
 def consultation_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
-    user_states[user_id] = {"mode": config['states']['main_menu']}
-    bot.messaging.send_message(peer, config['bot_settings']['commands']['consultation']['response'])
+    user_states[user_id] = {"mode": config['states']['help_with_ideas']}
+    bot.messaging.send_message(peer, "💡 Опишите область или задачу, для которой нужны идеи AI-агентов...")
 
 def help_handler(update: UpdateMessage):
     bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
@@ -227,15 +229,19 @@ def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
         
         # Генерируем файлы с базовой информацией
         if state["idea_data"]:
-            word_path, excel_path = generate_files(state["idea_data"], basic_cost_info)
-            bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
-            send_file(peer, word_path, text="📄 Техническое описание")
-            send_file(peer, excel_path, text="📊 Структурированные данные")
             try:
-                os.remove(word_path)
-                os.remove(excel_path)
-            except:
-                pass
+                word_path, excel_path = generate_files(state["idea_data"], basic_cost_info)
+                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
+                send_file(peer, word_path, text="📄 Техническое описание")
+                send_file(peer, excel_path, text="📊 Структурированные данные")
+                try:
+                    os.remove(word_path)
+                    os.remove(excel_path)
+                except:
+                    pass
+            except Exception as file_error:
+                logging.error(f"Ошибка при создании файлов: {file_error}")
+                bot.messaging.send_message(peer, "⚠️ Файлы создать не удалось, но анализ завершен")
 
     except Exception as e:
         logging.error(f"Ошибка при обработке идеи: {e}")
@@ -243,7 +249,7 @@ def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
         user_states[user_id] = {"mode": config['states']['main_menu']}
 
 def handle_cost_questions_mode(update: UpdateMessage, user_id: int):
-    """Обработка режима уточняющих вопросов для расчета стоимости"""
+    """Исправленная обработка режима уточняющих вопросов для расчета стоимости"""
     peer = update.peer
     text = update.message.text_message.text.strip()
     state = user_states[user_id]
@@ -253,21 +259,26 @@ def handle_cost_questions_mode(update: UpdateMessage, user_id: int):
             # Пользователь отвечает на уточняющие вопросы
             questions = state.get("cost_questions", {})
             
-            # Проверяем, хочет ли пользователь принудительно рассчитать
-            if any(word in text.lower() for word in ['рассчитать', 'посчитать', 'готово', 'хватит']):
+            # Проверяем команды завершения
+            finish_keywords = ['рассчитать', 'посчитать', 'готово', 'хватит', 'стоп', 'финиш', 'расчет']
+            if any(word in text.lower() for word in finish_keywords):
                 # Собираем уже данные ответы
-                answers = {k: v['answer'] for k, v in questions.items() if v.get('answered', False)}
+                answers = {}
+                for q_id, q_data in questions.items():
+                    if q_data.get('answered', False) and q_data.get('answer'):
+                        answers[q_id] = q_data['answer']
+                
                 if answers:
-                    bot.messaging.send_message(peer, "⏳ Делаю финальный расчет стоимости...")
+                    bot.messaging.send_message(peer, "⏳ Делаю финальный расчет стоимости на основе ваших ответов...")
                     final_cost, _ = calculate_final_cost(state["idea_data"], answers, user_id)
                     bot.messaging.send_message(peer, final_cost)
                     user_states[user_id] = {"mode": config['states']['main_menu']}
                     return
                 else:
-                    bot.messaging.send_message(peer, "❌ Нет ни одного ответа для расчета. Пожалуйста, ответьте хотя бы на несколько вопросов.")
+                    bot.messaging.send_message(peer, "❌ Нет ответов для расчета. Пожалуйста, ответьте хотя бы на несколько вопросов.")
                     return
             
-            # Обрабатываем ответы
+            # Обрабатываем ответы пользователя
             updated_questions, all_answered, status_msg = process_cost_answers(questions, text)
             state["cost_questions"] = updated_questions
             
@@ -276,20 +287,25 @@ def handle_cost_questions_mode(update: UpdateMessage, user_id: int):
             if all_answered:
                 # Все ответы получены, делаем финальный расчет
                 bot.messaging.send_message(peer, "⏳ Все ответы получены! Делаю детальный расчет...")
-                answers = {k: v['answer'] for k, v in updated_questions.items()}
+                answers = {}
+                for q_id, q_data in updated_questions.items():
+                    if q_data.get('answer'):
+                        answers[q_id] = q_data['answer']
+                
                 final_cost, _ = calculate_final_cost(state["idea_data"], answers, user_id)
                 bot.messaging.send_message(peer, final_cost)
                 user_states[user_id] = {"mode": config['states']['main_menu']}
             
         elif state["mode"] == "awaiting_detailed_cost_decision":
             # Пользователь решает, нужен ли детальный расчет
-            if any(word in text.lower() for word in ['да', 'детальный', 'расчет', 'уточнения', 'вопросы']):
+            positive_keywords = ['да', 'детальный', 'расчет', 'уточнения', 'вопросы', 'точный', 'подробный']
+            if any(word in text.lower() for word in positive_keywords):
                 bot.messaging.send_message(peer, "⏳ Генерирую уточняющие вопросы для точного расчета...")
                 
                 # Генерируем вопросы для уточнения
                 questions_text, questions_dict = generate_cost_questions(state["idea_data"])
                 
-                if questions_dict:
+                if questions_dict and questions_text:
                     bot.messaging.send_message(peer, questions_text)
                     user_states[user_id] = {
                         "mode": "cost_questions",
@@ -297,8 +313,9 @@ def handle_cost_questions_mode(update: UpdateMessage, user_id: int):
                         "cost_questions": questions_dict,
                         "is_unique": state.get("is_unique", True)
                     }
+                    logging.info(f"[User {user_id}] Переведен в режим cost_questions с {len(questions_dict)} вопросами")
                 else:
-                    bot.messaging.send_message(peer, "⚠️ Не удалось сгенерировать вопросы. Используйте базовый расчет.")
+                    bot.messaging.send_message(peer, "⚠️ Не удалось сгенерировать вопросы. Используем базовый расчет.")
                     user_states[user_id] = {"mode": config['states']['main_menu']}
             else:
                 # Пользователь не хочет детальный расчет
@@ -321,34 +338,33 @@ def text_handler(update: UpdateMessage, widget=None):
     # Логирование для отладки
     logging.info(f"[User {user_id}] Message: {text[:100]}... | Mode: {state.get('mode', 'none')}")
 
-    # === НОВАЯ ОБРАБОТКА РЕЖИМОВ РАСЧЕТА СТОИМОСТИ ===
-    if state["mode"] in ["cost_questions", "awaiting_detailed_cost_decision"]:
+    # === ОБРАБОТКА РЕЖИМОВ РАСЧЕТА СТОИМОСТИ (ПРИОРИТЕТ) ===
+    if state.get("mode") in ["cost_questions", "awaiting_detailed_cost_decision"]:
         handle_cost_questions_mode(update, user_id)
         return
 
-    # Спецрежимы (остаются без изменений)
-    if state["mode"] == config['states']['idea_choose_format']:
+    # === ОБРАБОТКА ДРУГИХ СПЕЦИАЛЬНЫХ РЕЖИМОВ ===
+    if state.get("mode") == config['states']['idea_choose_format']:
         if "шаблон" in text.lower():
             state["mode"] = config['states']['idea_template']
             state["current_field"] = 0
             state["idea_data"] = {}
             process_template_idea(update, user_id)
-        elif "сам" in text.lower():
+        elif "сам" in text.lower() or "свобод" in text.lower():
             state["mode"] = config['states']['idea_free_form']
             bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['free_form_prompt'])
         else:
             bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['template_choice_error'])
         return
 
-    elif state["mode"] == config['states']['idea_template']:
+    elif state.get("mode") == config['states']['idea_template']:
         process_template_idea(update, user_id)
         return
 
-    elif state["mode"] == config['states']['idea_free_form']:
+    elif state.get("mode") == config['states']['idea_free_form']:
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
         try:
             user_data = {"Описание в свободной форме": text, "user_id": user_id}
-            # Используем новую функцию finalize_idea_analysis
             finalize_idea_analysis(peer, user_id, {"idea_data": user_data}, text, is_template=False)
         except Exception as e:
             logging.error(f"Ошибка при обработке свободной идеи: {e}")
@@ -356,7 +372,7 @@ def text_handler(update: UpdateMessage, widget=None):
             user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    elif state["mode"] == config['states']['search_owners']:
+    elif state.get("mode") == config['states']['search_owners']:
         bot.messaging.send_message(peer, "🔍 Ищу подходящих владельцев...")
         try:
             owners_info = find_agent_owners(text)
@@ -367,7 +383,7 @@ def text_handler(update: UpdateMessage, widget=None):
         user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    elif state["mode"] == config['states']['help_with_ideas']:
+    elif state.get("mode") == config['states']['help_with_ideas']:
         bot.messaging.send_message(peer, "💡 Генерирую идеи специально для вас...")
         try:
             ideas_response = generate_idea_suggestions(text)
@@ -378,12 +394,12 @@ def text_handler(update: UpdateMessage, widget=None):
         user_states[user_id] = {"mode": config['states']['main_menu']}
         return
 
-    # Обычный диалог через GigaChat с использованием памяти
+    # === ОБЫЧНЫЙ ДИАЛОГ ЧЕРЕЗ GIGACHAT ===
     try:
         logging.info(f"[User {user_id}] Sending to GigaChat with memory...")
         gpt_response, detected_command = check_general_message_with_gigachat(text, user_id)
 
-        # Если в самом тексте GPT есть команда, но detected_command пуст
+        # Если в тексте GPT есть команда, но detected_command пуст
         if not detected_command and gpt_response:
             cmd_match = re.search(r"CMD:(\w+)", gpt_response, re.IGNORECASE)
             if cmd_match:
@@ -392,7 +408,7 @@ def text_handler(update: UpdateMessage, widget=None):
 
         if detected_command:
             logging.info(f"[User {user_id}] Detected command: {detected_command}")
-            # Выполняем только команду, без повторного текста от GPT
+            # Команды для выполнения
             command_map = {
                 "start": start_handler,
                 "ai_agent": agent_handler,
@@ -403,7 +419,7 @@ def text_handler(update: UpdateMessage, widget=None):
             }
             handler = command_map.get(detected_command)
             if handler:
-                # Отправляем ответ GPT перед выполнением команды
+                # Отправляем ответ GPT перед выполнением команды (очищенный от CMD)
                 if gpt_response and gpt_response.strip():
                     clean_gpt_response = re.sub(r'\s*CMD:\w+\s*', '', gpt_response).strip()
                     if clean_gpt_response:
@@ -411,7 +427,9 @@ def text_handler(update: UpdateMessage, widget=None):
                 handler(update)
             else:
                 logging.warning(f"[User {user_id}] No handler found for command: {detected_command}")
+                bot.messaging.send_message(peer, gpt_response)
         else:
+            # Обычный ответ без команды
             if gpt_response and gpt_response.strip():
                 bot.messaging.send_message(peer, gpt_response)
                 logging.info(f"[User {user_id}] Response sent successfully")
@@ -424,7 +442,6 @@ def text_handler(update: UpdateMessage, widget=None):
         error_msg = f"⚠️ Произошла ошибка при обработке сообщения: {str(e)}"
         logging.error(f"[User {user_id}] Error in text_handler: {e}")
         bot.messaging.send_message(peer, error_msg)
-
 
 def main():
     global bot
@@ -452,7 +469,7 @@ def main():
     logging.info("🤖 Бот запущен с поддержкой памяти диалогов!")
     logging.info("🧠 GigaChat будет автоматически помнить последние 10 сообщений каждого пользователя")
     logging.info("📊 Включена поддержка диаграмм оценки идей!")
-    logging.info("💰 Включена система детального расчета стоимости с уточняющими вопросами!")
+    logging.info("💰 Включена исправленная система детального расчета стоимости!")
     
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 
