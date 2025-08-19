@@ -16,11 +16,13 @@ from ai_agent import (
     find_agent_owners,
     generate_idea_suggestions,
     calculate_work_cost_interactive,
-    generate_idea_evaluation_diagram,  # НОВЫЙ ИМПОРТ
-    # Убираем импорт функций для команд памяти
+    generate_idea_evaluation_diagram,
+    # НОВЫЕ ИМПОРТЫ для системы уточнений
+    generate_cost_questions,
+    process_cost_answers,
+    calculate_final_cost,
+    handle_cost_calculation_flow,
 )
-
-user_states = {} 
 
 # Загрузка конфигурации
 with open('config.json', 'r', encoding='utf-8') as f:
@@ -62,7 +64,6 @@ def send_file(peer, file_path, text=None, name=None):
         logging.error(f"❌ Ошибка отправки файла {file_path}: {e}")
         return False
 
-# НОВАЯ ФУНКЦИЯ для отправки изображений
 def send_image(peer, image_path, caption=None):
     """Отправка изображения через бота"""
     try:
@@ -78,40 +79,6 @@ def send_image(peer, image_path, caption=None):
     except Exception as e:
         logging.error(f"❌ Ошибка отправки изображения {image_path}: {e}")
         return False
-
-def handle_interactive_cost_calc(user_id, peer, message_text):
-    """Обработка интерактивного расчёта стоимости через calculate_work_cost_interactive"""
-    from ai_agent import calculate_work_cost_interactive
-
-    state = user_states.get(user_id)
-    if not state:
-        state = {"mode": "cost_calc", "answers": {}, "step": 0}
-        user_states[user_id] = state
-
-    # Если это не первый шаг — сохраняем предыдущий ответ
-    if state["step"] > 0:
-        last_key = list(state["answers"].keys())[-1]
-        state["answers"][last_key] = message_text.strip()
-
-    # Получаем следующий вопрос или результат
-    next_data = calculate_work_cost_interactive(state["answers"], return_next=True)
-
-    if isinstance(next_data, dict) and next_data.get("done"):
-        # Завершили — отправляем результат
-        bot.messaging.send_message(peer, f"💰 Расчёт завершён:\n{next_data['result']}")
-        user_states.pop(user_id, None)
-    else:
-        # Продолжаем опрос
-        question = next_data.get("question")
-        key = next_data.get("key")
-        if question and key:
-            state["answers"][key] = None
-            state["step"] += 1
-            bot.messaging.send_message(peer, question)
-        else:
-            bot.messaging.send_message(peer, "⚠️ Ошибка при генерации следующего вопроса.")
-            user_states.pop(user_id, None)
-
 
 def start_handler(update: UpdateMessage):
     user_id = update.peer.id
@@ -192,9 +159,6 @@ def consultation_handler(update: UpdateMessage):
 def help_handler(update: UpdateMessage):
     bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
 
-# Функции для работы с памятью (только для внутреннего использования)
-# Память теперь работает автоматически без команд пользователя
-
 def process_template_idea(update: UpdateMessage, user_id: int):
     peer = update.peer
     text = update.message.text_message.text.strip()
@@ -210,46 +174,141 @@ def process_template_idea(update: UpdateMessage, user_id: int):
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['template_field'].format(field=field_name))
         state["current_field"] += 1
     else:
-        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
+        finalize_idea_analysis(peer, user_id, state, text, is_template=True)
+
+def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
+    """Завершает анализ идеи и предлагает детальный расчет стоимости"""
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
+    
+    try:
+        state["idea_data"]["user_id"] = user_id
+        response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(
+            text, state["idea_data"], is_free_form=not is_template
+        )
+        
+        # Базовый расчет стоимости
+        basic_cost_info = calculate_work_cost_interactive(parsed_data or state["idea_data"], is_unique)
+        
+        # Генерация и отправка диаграммы
         try:
-            state["idea_data"]["user_id"] = user_id
-            response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, state["idea_data"], is_free_form=False)
-            cost_info = calculate_work_cost_interactive(state["idea_data"], is_unique)
-            
-            # === НОВЫЙ КОД: Генерация и отправка диаграммы ===
-            try:
-                diagram_path = generate_idea_evaluation_diagram(state["idea_data"], is_unique, parsed_data)
-                if diagram_path and os.path.exists(diagram_path):
-                    logging.info(f"📊 Отправка диаграммы оценки: {diagram_path}")
-                    send_image(peer, diagram_path, "📊 Диаграмма оценки идеи")
-                    try:
-                        os.remove(diagram_path)  # Удаляем временный файл
-                        logging.info(f"🗑️ Временный файл диаграммы удален: {diagram_path}")
-                    except Exception as cleanup_error:
-                        logging.warning(f"Не удалось удалить файл диаграммы: {cleanup_error}")
-                else:
-                    logging.warning("Диаграмма не была создана")
-            except Exception as diagram_error:
-                logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
-            
-            bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
-
-            if state["idea_data"]:
-                word_path, excel_path = generate_files(state["idea_data"], cost_info)
-                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
-                send_file(peer, word_path, text="📄 Техническое описание")
-                send_file(peer, excel_path, text="📊 Структурированные данные")
+            diagram_path = generate_idea_evaluation_diagram(state["idea_data"], is_unique, parsed_data)
+            if diagram_path and os.path.exists(diagram_path):
+                logging.info(f"📊 Отправка диаграммы оценки: {diagram_path}")
+                send_image(peer, diagram_path, "📊 Диаграмма оценки идеи")
                 try:
-                    os.remove(word_path)
-                    os.remove(excel_path)
-                except:
-                    pass
+                    os.remove(diagram_path)
+                    logging.info(f"🗑️ Временный файл диаграммы удален: {diagram_path}")
+                except Exception as cleanup_error:
+                    logging.warning(f"Не удалось удалить файл диаграммы: {cleanup_error}")
+        except Exception as diagram_error:
+            logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
+        
+        # Отправляем результат анализа
+        analysis_message = f"🧠 **Результат анализа:**\n\n{response}\n\n{basic_cost_info}"
+        bot.messaging.send_message(peer, analysis_message)
+        
+        # Предлагаем детальный расчет
+        detailed_cost_offer = (
+            "💰 **Хотите получить детальный расчет стоимости?**\n\n"
+            "📝 Я могу задать несколько уточняющих вопросов и сделать более точный расчет "
+            "с разбивкой по этапам, команде и временным рамкам.\n\n"
+            "✅ Напишите 'да' или 'детальный расчет' для продолжения\n"
+            "❌ Или любое другое сообщение для завершения"
+        )
+        bot.messaging.send_message(peer, detailed_cost_offer)
+        
+        # Переводим в режим ожидания решения о детальном расчете
+        user_states[user_id] = {
+            "mode": "awaiting_detailed_cost_decision",
+            "idea_data": parsed_data or state["idea_data"],
+            "is_unique": is_unique,
+            "basic_cost": basic_cost_info
+        }
+        
+        # Генерируем файлы с базовой информацией
+        if state["idea_data"]:
+            word_path, excel_path = generate_files(state["idea_data"], basic_cost_info)
+            bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
+            send_file(peer, word_path, text="📄 Техническое описание")
+            send_file(peer, excel_path, text="📊 Структурированные данные")
+            try:
+                os.remove(word_path)
+                os.remove(excel_path)
+            except:
+                pass
 
-            user_states[user_id] = {"mode": config['states']['main_menu']}
-        except Exception as e:
-            logging.error(f"Ошибка при обработке шаблонной идеи: {e}")
-            bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
-            user_states[user_id] = {"mode": config['states']['main_menu']}
+    except Exception as e:
+        logging.error(f"Ошибка при обработке идеи: {e}")
+        bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
+        user_states[user_id] = {"mode": config['states']['main_menu']}
+
+def handle_cost_questions_mode(update: UpdateMessage, user_id: int):
+    """Обработка режима уточняющих вопросов для расчета стоимости"""
+    peer = update.peer
+    text = update.message.text_message.text.strip()
+    state = user_states[user_id]
+    
+    try:
+        if state["mode"] == "cost_questions":
+            # Пользователь отвечает на уточняющие вопросы
+            questions = state.get("cost_questions", {})
+            
+            # Проверяем, хочет ли пользователь принудительно рассчитать
+            if any(word in text.lower() for word in ['рассчитать', 'посчитать', 'готово', 'хватит']):
+                # Собираем уже данные ответы
+                answers = {k: v['answer'] for k, v in questions.items() if v.get('answered', False)}
+                if answers:
+                    bot.messaging.send_message(peer, "⏳ Делаю финальный расчет стоимости...")
+                    final_cost, _ = calculate_final_cost(state["idea_data"], answers, user_id)
+                    bot.messaging.send_message(peer, final_cost)
+                    user_states[user_id] = {"mode": config['states']['main_menu']}
+                    return
+                else:
+                    bot.messaging.send_message(peer, "❌ Нет ни одного ответа для расчета. Пожалуйста, ответьте хотя бы на несколько вопросов.")
+                    return
+            
+            # Обрабатываем ответы
+            updated_questions, all_answered, status_msg = process_cost_answers(questions, text)
+            state["cost_questions"] = updated_questions
+            
+            bot.messaging.send_message(peer, status_msg)
+            
+            if all_answered:
+                # Все ответы получены, делаем финальный расчет
+                bot.messaging.send_message(peer, "⏳ Все ответы получены! Делаю детальный расчет...")
+                answers = {k: v['answer'] for k, v in updated_questions.items()}
+                final_cost, _ = calculate_final_cost(state["idea_data"], answers, user_id)
+                bot.messaging.send_message(peer, final_cost)
+                user_states[user_id] = {"mode": config['states']['main_menu']}
+            
+        elif state["mode"] == "awaiting_detailed_cost_decision":
+            # Пользователь решает, нужен ли детальный расчет
+            if any(word in text.lower() for word in ['да', 'детальный', 'расчет', 'уточнения', 'вопросы']):
+                bot.messaging.send_message(peer, "⏳ Генерирую уточняющие вопросы для точного расчета...")
+                
+                # Генерируем вопросы для уточнения
+                questions_text, questions_dict = generate_cost_questions(state["idea_data"])
+                
+                if questions_dict:
+                    bot.messaging.send_message(peer, questions_text)
+                    user_states[user_id] = {
+                        "mode": "cost_questions",
+                        "idea_data": state["idea_data"],
+                        "cost_questions": questions_dict,
+                        "is_unique": state.get("is_unique", True)
+                    }
+                else:
+                    bot.messaging.send_message(peer, "⚠️ Не удалось сгенерировать вопросы. Используйте базовый расчет.")
+                    user_states[user_id] = {"mode": config['states']['main_menu']}
+            else:
+                # Пользователь не хочет детальный расчет
+                bot.messaging.send_message(peer, "✅ Понятно! Базовый расчет стоимости уже предоставлен выше.")
+                user_states[user_id] = {"mode": config['states']['main_menu']}
+                
+    except Exception as e:
+        logging.error(f"Ошибка в обработке вопросов стоимости: {e}")
+        bot.messaging.send_message(peer, f"⚠️ Произошла ошибка: {e}")
+        user_states[user_id] = {"mode": config['states']['main_menu']}
 
 def text_handler(update: UpdateMessage, widget=None):
     if not update.message or not update.message.text_message:
@@ -260,12 +319,14 @@ def text_handler(update: UpdateMessage, widget=None):
     state = user_states.get(user_id, {"mode": config['states']['main_menu']})
 
     # Логирование для отладки
-    logging.info(f"[User {user_id}] Message: {text[:100]}...")  # Первые 100 символов
-    if user_id in user_states and user_states[user_id].get("mode") == "cost_calc":
-            handle_interactive_cost_calc(user_id, peer, text)
-            return
+    logging.info(f"[User {user_id}] Message: {text[:100]}... | Mode: {state.get('mode', 'none')}")
 
-    # Спецрежимы (остаются без изменений, но теперь с поддержкой памяти)
+    # === НОВАЯ ОБРАБОТКА РЕЖИМОВ РАСЧЕТА СТОИМОСТИ ===
+    if state["mode"] in ["cost_questions", "awaiting_detailed_cost_decision"]:
+        handle_cost_questions_mode(update, user_id)
+        return
+
+    # Спецрежимы (остаются без изменений)
     if state["mode"] == config['states']['idea_choose_format']:
         if "шаблон" in text.lower():
             state["mode"] = config['states']['idea_template']
@@ -287,40 +348,8 @@ def text_handler(update: UpdateMessage, widget=None):
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
         try:
             user_data = {"Описание в свободной форме": text, "user_id": user_id}
-            response, is_unique, parsed_data, _ = check_idea_with_gigachat_local(text, user_data, is_free_form=True)
-            cost_info = calculate_work_cost_interactive(parsed_data or user_data, is_unique)
-            if user_id in user_states and user_states[user_id].get("mode") == "cost_calc":
-                handle_interactive_cost_calc(user_id, peer, text)
-                return
-            
-            try:
-                diagram_path = generate_idea_evaluation_diagram(user_data, is_unique, parsed_data)
-                if diagram_path and os.path.exists(diagram_path):
-                    logging.info(f"📊 Отправка диаграммы оценки: {diagram_path}")
-                    send_image(peer, diagram_path, "📊 Диаграмма оценки идеи")
-                    try:
-                        os.remove(diagram_path)  # Удаляем временный файл
-                        logging.info(f"🗑️ Временный файл диаграммы удален: {diagram_path}")
-                    except Exception as cleanup_error:
-                        logging.warning(f"Не удалось удалить файл диаграммы: {cleanup_error}")
-                else:
-                    logging.warning("Диаграмма не была создана")
-            except Exception as diagram_error:
-                logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
-            
-            bot.messaging.send_message(peer, f"🧠 **Результат анализа:**\n\n{response}\n\n{cost_info}")
-            
-            if parsed_data:
-                word_path, excel_path = generate_files(parsed_data, cost_info)
-                bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
-                send_file(peer, word_path, text="📄 Техническое описание")
-                send_file(peer, excel_path, text="📊 Структурированные данные")
-                try:
-                    os.remove(word_path)
-                    os.remove(excel_path)
-                except:
-                    pass
-            user_states[user_id] = {"mode": config['states']['main_menu']}
+            # Используем новую функцию finalize_idea_analysis
+            finalize_idea_analysis(peer, user_id, {"idea_data": user_data}, text, is_template=False)
         except Exception as e:
             logging.error(f"Ошибка при обработке свободной идеи: {e}")
             bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
@@ -348,11 +377,6 @@ def text_handler(update: UpdateMessage, widget=None):
             bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
         user_states[user_id] = {"mode": config['states']['main_menu']}
         return
-    elif detected_command == "idea_free_form":
-        user_states[user_id] = {"mode": "cost_calc", "answers": {}, "step": 0}
-        bot.messaging.send_message(peer, "Давайте уточним детали вашей идеи! Начнём с первого вопроса:")
-        handle_interactive_cost_calc(user_id, peer, "")
-
 
     # Обычный диалог через GigaChat с использованием памяти
     try:
@@ -379,6 +403,11 @@ def text_handler(update: UpdateMessage, widget=None):
             }
             handler = command_map.get(detected_command)
             if handler:
+                # Отправляем ответ GPT перед выполнением команды
+                if gpt_response and gpt_response.strip():
+                    clean_gpt_response = re.sub(r'\s*CMD:\w+\s*', '', gpt_response).strip()
+                    if clean_gpt_response:
+                        bot.messaging.send_message(peer, clean_gpt_response)
                 handler(update)
             else:
                 logging.warning(f"[User {user_id}] No handler found for command: {detected_command}")
@@ -422,7 +451,8 @@ def main():
     
     logging.info("🤖 Бот запущен с поддержкой памяти диалогов!")
     logging.info("🧠 GigaChat будет автоматически помнить последние 10 сообщений каждого пользователя")
-    logging.info("📊 Включена поддержка диаграмм оценки идей!")  # НОВОЕ СООБЩЕНИЕ
+    logging.info("📊 Включена поддержка диаграмм оценки идей!")
+    logging.info("💰 Включена система детального расчета стоимости с уточняющими вопросами!")
     
     bot.updates.on_updates(do_read_message=True, do_register_commands=True)
 
