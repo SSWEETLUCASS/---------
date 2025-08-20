@@ -134,6 +134,53 @@ class MemoryManager:
         
         return f"В памяти {len(history)} обменов сообщениями. Последнее: {history[-1]['timestamp']}"
 
+class CommandDetector:
+    """Класс для детекции команд без обращения к GigaChat"""
+    
+    @staticmethod
+    def detect_command(message: str) -> Optional[str]:
+        """Детекция команд по ключевым словам"""
+        message_lower = message.lower().strip()
+        
+        # Приветствие
+        if any(word in message_lower for word in ['привет', 'hello', 'hi', 'начать', 'старт', '/start']):
+            return 'start'
+        
+        # Помощь
+        if any(word in message_lower for word in ['помощь', 'help', 'справка', 'что умеешь', 'команды']):
+            return 'help'
+        
+        # Список агентов
+        if any(phrase in message_lower for phrase in [
+            'список агентов', 'все агенты', 'покажи агентов', 'агенты список',
+            'список всех', 'показать всех агентов'
+        ]):
+            return 'ai_agent'
+        
+        # Поиск владельцев
+        if any(phrase in message_lower for phrase in [
+            'найди агент', 'кто занимается', 'владелец агента', 'контакт',
+            'найди владельца', 'кто отвечает', 'кто делал'
+        ]):
+            return 'search_owners'
+        
+        # Консультация/генерация идей
+        if any(phrase in message_lower for phrase in [
+            'придумай идею', 'предложи', 'что можно автоматизировать',
+            'дай совет', 'посоветуй', 'идеи для', 'что делать с'
+        ]):
+            return 'consultation'
+        
+        # Описание идеи (длинный текст или ключевые слова)
+        if (len(message) > 100 or 
+            any(phrase in message_lower for phrase in [
+                'хочу сделать', 'идея агента', 'автоматизировать', 'улучшить процесс',
+                'создать агента', 'разработать', 'процесс выглядит'
+            ])):
+            return 'idea'
+        
+        return None
+
 class TextProcessor:
     """Класс для обработки текста"""
     
@@ -208,6 +255,11 @@ class TextProcessor:
     def safe_str(value: Any) -> str:
         """Безопасное преобразование значений в строку"""
         if isinstance(value, dict):
+            # Проверяем, не является ли это результатом интерактивного расчета
+            if 'question' in value and 'key' in value:
+                return f"Вопрос: {value['question']}"
+            elif 'done' in value and 'result' in value:
+                return value['result']
             return json.dumps(value, ensure_ascii=False, indent=2)
         if isinstance(value, list):
             return ", ".join(map(str, value))
@@ -222,6 +274,7 @@ class GigaChatProcessor:
         self.agent_processor = AgentDataProcessor()
         self.memory_manager = MemoryManager()
         self.text_processor = TextProcessor()
+        self.command_detector = CommandDetector()
 
     def check_idea_with_gigachat(self, user_input: str, user_data: Dict[str, Any], 
                                 is_free_form: bool = False) -> Tuple[str, bool, Dict, bool]:
@@ -283,7 +336,11 @@ class GigaChatProcessor:
                     try:
                         cost_calculator = CostCalculator()
                         cost = cost_calculator.calculate_work_cost_interactive(parsed_data)
-                        if isinstance(cost, (int, float)):
+                        # Исправляем обработку результата интерактивного расчета
+                        if isinstance(cost, dict):
+                            if 'result' in cost:
+                                response_text += f"\n\n💰 {cost['result']}"
+                        elif isinstance(cost, (int, float)) and cost > 0:
                             response_text += f"\n\n💰 Примерная стоимость работы: {cost:,.0f} ₽"
                     except Exception as e:
                         logging.error(f"Ошибка при расчете стоимости: {e}")
@@ -300,8 +357,17 @@ class GigaChatProcessor:
             return error_msg, False, {}, False
 
     def check_general_message(self, msg: str, user_id: Optional[int] = None) -> Tuple[str, Optional[str]]:
-        """Проверка общего сообщения с помощью GigaChat"""
+        """Проверка общего сообщения - сначала локальная детекция команд, затем GigaChat"""
         try:
+            # Сначала пробуем определить команду локально
+            detected_command = self.command_detector.detect_command(msg)
+            
+            if detected_command:
+                # Если команда определена локально, возвращаем её без обращения к GigaChat
+                logging.info(f"[Local Command Detection] Detected: {detected_command}")
+                return "", detected_command
+            
+            # Если команда не определена, обращаемся к GigaChat
             # Получаем контекст предыдущих сообщений
             conversation_context = self.memory_manager.get_conversation_context(user_id)
             
@@ -321,7 +387,7 @@ class GigaChatProcessor:
             if cmd_match:
                 response = re.sub(r'\s*CMD:\w+\s*', '', response).strip()
             
-            # Сохраняем в память
+            # Сохраняем в память только если есть содержательный ответ
             if user_id and response:
                 self.memory_manager.add_to_memory(user_id, msg, response)
             
@@ -591,7 +657,6 @@ class CostCalculator:
 
 📝 **Примечание:** Стоимость может изменяться в зависимости от детальных требований.
             """
-            
         except Exception as e:
             logging.error(f"Ошибка при расчете стоимости: {e}")
             return f"⚠️ Ошибка при расчете стоимости: {e}"
