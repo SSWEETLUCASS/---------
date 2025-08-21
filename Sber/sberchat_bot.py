@@ -87,11 +87,26 @@ def start_handler(update: UpdateMessage):
 def idea_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
-    # Проверяем, не находится ли пользователь уже в процессе
     current_state = user_states.get(user_id, {})
-    if current_state.get("mode", "").startswith("idea_") or current_state.get("mode") in ["cost_questions", "awaiting_detailed_cost_decision"]:
-        bot.messaging.send_message(peer, config['error_messages']['already_in_process'])
+
+    # Если уже в процессе доработки идеи → не перескакиваем заново
+    if current_state.get("mode") in [
+        config['states']['idea_template'],
+        config['states']['idea_free_form'],
+        "cost_questions",
+        "awaiting_detailed_cost_decision"
+    ]:
+        bot.messaging.send_message(peer, "⚠️ Вы уже работаете над идеей, можете продолжить уточнение.")
         return
+
+    # Иначе запускаем новый процесс
+    user_states[user_id] = {
+        "mode": config['states']['idea_choose_format'],
+        "current_field": 0,
+        "idea_data": {}
+    }
+    bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
+
     
     user_states[user_id] = {
         "mode": config['states']['idea_choose_format'],
@@ -154,9 +169,11 @@ def search_owners_handler(update: UpdateMessage):
 
 def consultation_handler(update: UpdateMessage):
     peer = update.peer
-    user_id = peer.id
-    user_states[user_id] = {"mode": config['states']['help_with_ideas']}
-    bot.messaging.send_message(peer, "💡 Опишите область или задачу, для которой нужны идеи AI-агентов...")
+    # Consultation теперь = полезные ссылки
+    links = config['bot_settings']['commands']['consultation']['responses']['links']
+    bot.messaging.send_message(peer, f"📚 Полезные материалы:\n\n{links}")
+    user_states[peer.id] = {"mode": config['states']['main_menu']}
+
 
 def help_handler(update: UpdateMessage):
     bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
@@ -361,16 +378,15 @@ def text_handler(update: UpdateMessage, widget=None):
         process_template_idea(update, user_id)
         return
 
-    elif state.get("mode") == config['states']['idea_free_form']:
-        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['processing'])
-        try:
-            user_data = {"Описание в свободной форме": text, "user_id": user_id}
+    # === Если уже в режиме работы с идеей ===
+    if state.get("mode") in [config['states']['idea_template'], config['states']['idea_free_form']]:
+        if state["mode"] == config['states']['idea_template']:
+            process_template_idea(update, user_id)
+        elif state["mode"] == config['states']['idea_free_form']:
+            user_data = {"Описание (уточнение)": text, "user_id": user_id}
             finalize_idea_analysis(peer, user_id, {"idea_data": user_data}, text, is_template=False)
-        except Exception as e:
-            logging.error(f"Ошибка при обработке свободной идеи: {e}")
-            bot.messaging.send_message(peer, config['error_messages']['analysis_error'].format(error=e))
-            user_states[user_id] = {"mode": config['states']['main_menu']}
         return
+
 
     elif state.get("mode") == config['states']['search_owners']:
         bot.messaging.send_message(peer, "🔍 Ищу подходящих владельцев...")
