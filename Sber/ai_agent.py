@@ -53,7 +53,7 @@ class AgentDataProcessor:
             agents_data = []
 
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if not row or len(row) < 8 or not row[4]:  # Проверяем минимальную длину и ключевое поле
+                if not row or len(row) < 8 or not row[4]:
                     continue
                 
                 block, ssp, owner, contact, name, short_name, desc, typ = row[:8]
@@ -81,19 +81,17 @@ class MemoryManager:
     
     @staticmethod
     def add_to_memory(user_id: Optional[int], user_message: str, bot_response: str) -> None:
-        """Добавляет обмен сообщениями в память пользователя"""
         if not user_id:
             return
-            
+        
         gigachat_memory[user_id].append({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "user": user_message.strip()[:500],  # Ограничиваем длину для экономии памяти
+            "user": user_message.strip()[:500],
             "bot": bot_response.strip()[:500]
         })
 
     @staticmethod
     def get_conversation_context(user_id: Optional[int]) -> str:
-        """Получает контекст предыдущих сообщений пользователя"""
         if not user_id or user_id not in gigachat_memory:
             return ""
         
@@ -101,7 +99,6 @@ class MemoryManager:
         if not history:
             return ""
         
-        # Формируем контекст из последних сообщений
         context_parts = []
         for i, exchange in enumerate(history, 1):
             context_parts.extend([
@@ -110,12 +107,10 @@ class MemoryManager:
                 f"Бот: {exchange['bot']}",
                 ""
             ])
-        
         return "\n".join(context_parts)
     
     @staticmethod
     def clear_user_memory(user_id: int) -> bool:
-        """Очистка памяти пользователя"""
         if user_id in gigachat_memory:
             gigachat_memory[user_id].clear()
             logging.info(f"Память пользователя {user_id} очищена")
@@ -124,7 +119,6 @@ class MemoryManager:
     
     @staticmethod
     def get_memory_summary(user_id: int) -> str:
-        """Получение сводки по памяти пользователя"""
         if not user_id or user_id not in gigachat_memory:
             return "Память пуста"
         
@@ -135,50 +129,27 @@ class MemoryManager:
         return f"В памяти {len(history)} обменов сообщениями. Последнее: {history[-1]['timestamp']}"
 
 class CommandDetector:
-    """Класс для детекции команд без обращения к GigaChat"""
+    """Класс для детекции команд"""
     
     @staticmethod
     def detect_command(message: str) -> Optional[str]:
-        """Детекция команд по ключевым словам"""
         message_lower = message.lower().strip()
-        
-        # Приветствие
+
         if any(word in message_lower for word in ['привет', 'hello', 'hi', 'начать', 'старт', '/start']):
             return 'start'
-        
-        # Помощь
         if any(word in message_lower for word in ['помощь', 'help', 'справка', 'что умеешь', 'команды']):
             return 'help'
-        
-        # Список агентов
-        if any(phrase in message_lower for phrase in [
-            'список агентов', 'все агенты', 'покажи агентов', 'агенты список',
-            'список всех', 'показать всех агентов'
-        ]):
+        if any(phrase in message_lower for phrase in ['список агентов', 'все агенты', 'покажи агентов', 'агенты список']):
             return 'ai_agent'
-        
-        # Поиск владельцев
-        if any(phrase in message_lower for phrase in [
-            'найди агент', 'кто занимается', 'владелец агента', 'контакт',
-            'найди владельца', 'кто отвечает', 'кто делал'
-        ]):
+        if any(phrase in message_lower for phrase in ['найди агент', 'кто занимается', 'владелец агента', 'контакт']):
             return 'search_owners'
-        
-        # Консультация/генерация идей
-        if any(phrase in message_lower for phrase in [
-            'придумай идею', 'предложи', 'что можно автоматизировать',
-            'дай совет', 'посоветуй', 'идеи для', 'что делать с'
-        ]):
+        if any(phrase in message_lower for phrase in ['придумай идею', 'посоветуй', 'идеи для', 'что делать с']):
             return 'consultation'
-        
-        # Описание идеи (длинный текст или ключевые слова)
-        if (len(message) > 100 or 
-            any(phrase in message_lower for phrase in [
-                'хочу сделать', 'идея агента', 'автоматизировать', 'улучшить процесс',
-                'создать агента', 'разработать', 'процесс выглядит'
-            ])):
+
+        # длинный текст → идея, короткий → уточнение (без команды)
+        if (len(message) > 100 or any(phrase in message_lower for phrase in ['идея агента', 'создать агента'])):
             return 'idea'
-        
+
         return None
 
 class TextProcessor:
@@ -1388,8 +1359,6 @@ class CostCalculationManager:
         return questions
 
 class AIAgentBot:
-    """Основной класс бота для работы с AI-агентами"""
-    
     def __init__(self):
         self.gigachat = GigaChatProcessor()
         self.cost_manager = CostCalculationManager()
@@ -1397,36 +1366,47 @@ class AIAgentBot:
         self.diagram_generator = DiagramGenerator()
         self.memory_manager = MemoryManager()
 
-    def process_user_message(self, message: str, user_id: Optional[int] = None, 
-                           context: Optional[Dict] = None) -> Dict[str, Any]:
-        """Главный метод обработки сообщений пользователя"""
+    def process_user_message(self, message: str, user_id: Optional[int] = None, context: Optional[Dict] = None) -> Dict[str, Any]:
         try:
-            # Проверяем тип сообщения
             response, command = self.gigachat.check_general_message(message, user_id)
-            
+
             result = {
-                'response': response,
+                'response': response or "",
                 'command': command,
                 'files': [],
                 'diagram': None,
                 'success': True
             }
-            
-            # Обрабатываем команды
+
             if command:
-                result.update(self._handle_command(command, message, user_id, context))
-            
+                cmd_result = self._handle_command(command, message, user_id, context)
+                if 'response' in cmd_result:
+                    result['response'] = (result['response'] + "\n" + cmd_result['response']).strip()
+                result.update({k: v for k, v in cmd_result.items() if k != 'response'})
             return result
-            
         except Exception as e:
             logging.error(f"Ошибка в обработке сообщения: {e}")
-            return {
-                'response': f"⚠️ Произошла ошибка при обработке сообщения: {e}",
-                'command': None,
-                'files': [],
-                'diagram': None,
-                'success': False
-            }
+            return {'response': f"⚠️ Ошибка: {e}", 'command': None, 'files': [], 'diagram': None, 'success': False}
+
+    def _handle_command(self, command: str, message: str, user_id: Optional[int], context: Optional[Dict]) -> Dict[str, Any]:
+        result = {}
+        if command == 'start':
+            result['response'] = self._get_start_message()
+        elif command == 'help':
+            result['response'] = self._get_help_message()
+        elif command == 'ai_agent':
+            summary_file = self.get_agents_summary()
+            if summary_file:
+                result['files'] = [summary_file]
+                result['response'] = f"📊 Создан аналитический файл: {summary_file}"
+        elif command == 'search_owners':
+            result['response'] = self.gigachat.find_agent_owners(message)
+        elif command == 'consultation':
+            result['response'] = self.generate_idea_suggestions(message)
+        elif command == 'idea':
+            result['response'] = "💡 Для обработки идеи используйте метод process_idea"
+        return result
+
 
     def process_idea(self, user_data: Dict[str, Any], is_free_form: bool = False, 
                     user_id: Optional[int] = None) -> Dict[str, Any]:
