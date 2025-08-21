@@ -24,8 +24,15 @@ from ai_agent import (
 )
 
 # Загрузка конфигурации
-with open('config.json', 'r', encoding='utf-8') as f:
-    config = json.load(f)
+try:
+    with open('config.json', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+except FileNotFoundError:
+    logging.error("Файл config.json не найден!")
+    raise
+except json.JSONDecodeError as e:
+    logging.error(f"Ошибка в формате config.json: {e}")
+    raise
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -35,6 +42,9 @@ os.environ["REQUESTS_CA_BUNDLE"] = config['file_settings']['certificates']['requ
 os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = config['file_settings']['certificates']['grpc_roots']
 
 BOT_TOKEN = os.getenv("DIALOG_BOT_TOKEN")
+if not BOT_TOKEN:
+    logging.error("DIALOG_BOT_TOKEN не найден в переменных окружения!")
+    raise ValueError("BOT_TOKEN is required")
 
 # Настройка логирования
 logging.basicConfig(
@@ -50,6 +60,10 @@ bot = None
 def send_file(peer, file_path, text=None, name=None):
     """Отправка файла с возможным описанием"""
     try:
+        if not os.path.exists(file_path):
+            logging.error(f"Файл не существует: {file_path}")
+            return False
+            
         logging.info(f"📤 Отправка файла: {file_path}")
         with open(file_path, "rb") as f:
             bot.messaging.send_file_sync(
@@ -66,6 +80,10 @@ def send_file(peer, file_path, text=None, name=None):
 def send_image(peer, image_path, caption=None):
     """Отправка изображения через бота"""
     try:
+        if not os.path.exists(image_path):
+            logging.error(f"Изображение не существует: {image_path}")
+            return False
+            
         logging.info(f"📤 Отправка изображения: {image_path}")
         with open(image_path, "rb") as f:
             bot.messaging.send_file_sync(
@@ -80,11 +98,13 @@ def send_image(peer, image_path, caption=None):
         return False
 
 def start_handler(update: UpdateMessage):
+    """Обработчик команды /start"""
     user_id = update.peer.id
     user_states[user_id] = {"mode": config['states']['main_menu']}
     bot.messaging.send_message(update.peer, config['bot_settings']['commands']['start']['response'])
 
 def idea_handler(update: UpdateMessage):
+    """Обработчик команды /idea"""
     peer = update.peer
     user_id = peer.id
     current_state = user_states.get(user_id, {})
@@ -107,20 +127,14 @@ def idea_handler(update: UpdateMessage):
     }
     bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
 
-    
-    user_states[user_id] = {
-        "mode": config['states']['idea_choose_format'],
-        "current_field": 0,
-        "idea_data": {}
-    }
-    bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
-
 def agent_handler(update: UpdateMessage):
+    """Обработчик команды /ai_agent"""
     peer = update.peer
     try:
         agents_file_path = config['file_settings']['agents_file']
         if not os.path.exists(agents_file_path):
             bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_not_found'])
+            # Создаем файл если его нет
             wb = Workbook()
             ws = wb.active
             ws.append(["Блок", "ССП", "Владелец", "Контакт", "Название", "Краткое название", "Описание", "Тип"])
@@ -137,6 +151,7 @@ def agent_handler(update: UpdateMessage):
                 bot.messaging.send_message(peer, config['bot_settings']['commands']['ai_agent']['responses']['file_error'].format(file_type="аналитический"))
             try:
                 os.remove(summary_file)
+                logging.info(f"Временный файл удален: {summary_file}")
             except Exception as e:
                 logging.warning(f"Не удалось удалить временный файл: {e}")
 
@@ -145,6 +160,7 @@ def agent_handler(update: UpdateMessage):
         bot.messaging.send_message(peer, config['error_messages']['file_error'].format(error=e))
 
 def search_owners_handler(update: UpdateMessage):
+    """Обработчик команды /search_owners"""
     peer = update.peer
     user_id = peer.id
     try:
@@ -168,17 +184,19 @@ def search_owners_handler(update: UpdateMessage):
         bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
 
 def consultation_handler(update: UpdateMessage):
+    """Обработчик команды /consultation"""
     peer = update.peer
     # Consultation теперь = полезные ссылки
     links = config['bot_settings']['commands']['consultation']['responses']['links']
     bot.messaging.send_message(peer, f"📚 Полезные материалы:\n\n{links}")
     user_states[peer.id] = {"mode": config['states']['main_menu']}
 
-
 def help_handler(update: UpdateMessage):
+    """Обработчик команды /help"""
     bot.messaging.send_message(update.peer, config['bot_settings']['commands']['help']['response'])
 
 def process_template_idea(update: UpdateMessage, user_id: int):
+    """Обработка идеи по шаблону"""
     peer = update.peer
     text = update.message.text_message.text.strip()
     state = user_states[user_id]
@@ -195,6 +213,15 @@ def process_template_idea(update: UpdateMessage, user_id: int):
     else:
         finalize_idea_analysis(peer, user_id, state, text, is_template=True)
 
+def cleanup_temp_file(file_path, description="файл"):
+    """Безопасное удаление временного файла"""
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            logging.info(f"🗑️ Временный {description} удален: {file_path}")
+    except Exception as cleanup_error:
+        logging.warning(f"Не удалось удалить {description} {file_path}: {cleanup_error}")
+
 def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
     """Завершает анализ идеи и предлагает детальный расчет стоимости"""
     bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['complete'])
@@ -209,18 +236,16 @@ def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
         basic_cost_info = calculate_work_cost_interactive(parsed_data or state["idea_data"], is_unique)
         
         # Генерация и отправка диаграммы
+        diagram_path = None
         try:
             diagram_path = generate_idea_evaluation_diagram(state["idea_data"], is_unique, parsed_data)
             if diagram_path and os.path.exists(diagram_path):
                 logging.info(f"📊 Отправка диаграммы оценки: {diagram_path}")
                 send_image(peer, diagram_path, "📊 Диаграмма оценки идеи")
-                try:
-                    os.remove(diagram_path)
-                    logging.info(f"🗑️ Временный файл диаграммы удален: {diagram_path}")
-                except Exception as cleanup_error:
-                    logging.warning(f"Не удалось удалить файл диаграммы: {cleanup_error}")
         except Exception as diagram_error:
             logging.error(f"Ошибка при создании диаграммы: {diagram_error}")
+        finally:
+            cleanup_temp_file(diagram_path, "файл диаграммы")
         
         # Отправляем результат анализа
         analysis_message = f"🧠 **Результат анализа:**\n\n{response}\n\n{basic_cost_info}"
@@ -229,7 +254,7 @@ def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
         # Предлагаем детальный расчет
         detailed_cost_offer = (
             "💰 **Хотите получить детальный расчет стоимости?**\n\n"
-            "📝 Я могу задать несколько уточняющих вопросов и сделать более точный расчет "
+            "🔍 Я могу задать несколько уточняющих вопросов и сделать более точный расчет "
             "с разбивкой по этапам, команде и временным рамкам.\n\n"
             "✅ Напишите 'да' или 'детальный расчет' для продолжения\n"
             "❌ Или любое другое сообщение для завершения"
@@ -246,19 +271,19 @@ def finalize_idea_analysis(peer, user_id, state, text, is_template=False):
         
         # Генерируем файлы с базовой информацией
         if state["idea_data"]:
+            word_path = None
+            excel_path = None
             try:
                 word_path, excel_path = generate_files(state["idea_data"], basic_cost_info)
                 bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['files_ready'])
                 send_file(peer, word_path, text="📄 Техническое описание")
                 send_file(peer, excel_path, text="📊 Структурированные данные")
-                try:
-                    os.remove(word_path)
-                    os.remove(excel_path)
-                except:
-                    pass
             except Exception as file_error:
                 logging.error(f"Ошибка при создании файлов: {file_error}")
                 bot.messaging.send_message(peer, "⚠️ Файлы создать не удалось, но анализ завершен")
+            finally:
+                cleanup_temp_file(word_path, "Word документ")
+                cleanup_temp_file(excel_path, "Excel файл")
 
     except Exception as e:
         logging.error(f"Ошибка при обработке идеи: {e}")
@@ -345,8 +370,10 @@ def handle_cost_questions_mode(update: UpdateMessage, user_id: int):
         user_states[user_id] = {"mode": config['states']['main_menu']}
 
 def text_handler(update: UpdateMessage, widget=None):
+    """Основной обработчик текстовых сообщений"""
     if not update.message or not update.message.text_message:
         return
+        
     text = update.message.text_message.text.strip()
     user_id = update.peer.id
     peer = update.peer
@@ -378,15 +405,10 @@ def text_handler(update: UpdateMessage, widget=None):
         process_template_idea(update, user_id)
         return
 
-    # === Если уже в режиме работы с идеей ===
-    if state.get("mode") in [config['states']['idea_template'], config['states']['idea_free_form']]:
-        if state["mode"] == config['states']['idea_template']:
-            process_template_idea(update, user_id)
-        elif state["mode"] == config['states']['idea_free_form']:
-            user_data = {"Описание (уточнение)": text, "user_id": user_id}
-            finalize_idea_analysis(peer, user_id, {"idea_data": user_data}, text, is_template=False)
+    elif state.get("mode") == config['states']['idea_free_form']:
+        user_data = {"Описание (уточнение)": text, "user_id": user_id}
+        finalize_idea_analysis(peer, user_id, {"idea_data": user_data}, text, is_template=False)
         return
-
 
     elif state.get("mode") == config['states']['search_owners']:
         bot.messaging.send_message(peer, "🔍 Ищу подходящих владельцев...")
@@ -460,34 +482,44 @@ def text_handler(update: UpdateMessage, widget=None):
         bot.messaging.send_message(peer, error_msg)
 
 def main():
+    """Основная функция запуска бота"""
     global bot
-    bot = DialogBot.create_bot({
-        "endpoint": config['bot_settings']['endpoint'],
-        "token": BOT_TOKEN,
-        "is_secure": config['bot_settings']['is_secure'],
-    })
     
-    handlers = []
-    
-    # Основные команды из конфига
-    for cmd, cmd_data in config['bot_settings']['commands'].items():
-        handler_func = globals()[cmd_data['handler']]
-        handlers.append(CommandHandler(handler_func, cmd))
-        if 'aliases' in cmd_data:
-            for alias in cmd_data['aliases']:
-                handlers.append(CommandHandler(handler_func, alias))
-    
-    bot.messaging.command_handler(handlers)
-    bot.messaging.message_handler([
-        MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)
-    ])
-    
-    logging.info("🤖 Бот запущен с поддержкой памяти диалогов!")
-    logging.info("🧠 GigaChat будет автоматически помнить последние 10 сообщений каждого пользователя")
-    logging.info("📊 Включена поддержка диаграмм оценки идей!")
-    logging.info("💰 Включена исправленная система детального расчета стоимости!")
-    
-    bot.updates.on_updates(do_read_message=True, do_register_commands=True)
+    try:
+        bot = DialogBot.create_bot({
+            "endpoint": config['bot_settings']['endpoint'],
+            "token": BOT_TOKEN,
+            "is_secure": config['bot_settings']['is_secure'],
+        })
+        
+        handlers = []
+        
+        # Основные команды из конфига
+        for cmd, cmd_data in config['bot_settings']['commands'].items():
+            handler_func = globals().get(cmd_data['handler'])
+            if handler_func:
+                handlers.append(CommandHandler(handler_func, cmd))
+                if 'aliases' in cmd_data:
+                    for alias in cmd_data['aliases']:
+                        handlers.append(CommandHandler(handler_func, alias))
+            else:
+                logging.warning(f"Handler {cmd_data['handler']} not found for command {cmd}")
+        
+        bot.messaging.command_handler(handlers)
+        bot.messaging.message_handler([
+            MessageHandler(text_handler, MessageContentType.TEXT_MESSAGE)
+        ])
+        
+        logging.info("🤖 Бот запущен с поддержкой памяти диалогов!")
+        logging.info("🧠 GigaChat будет автоматически помнить последние 10 сообщений каждого пользователя")
+        logging.info("📊 Включена поддержка диаграмм оценки идей!")
+        logging.info("💰 Включена исправленная система детального расчета стоимости!")
+        
+        bot.updates.on_updates(do_read_message=True, do_register_commands=True)
+        
+    except Exception as e:
+        logging.error(f"Критическая ошибка при запуске бота: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
