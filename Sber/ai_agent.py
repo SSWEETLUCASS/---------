@@ -215,12 +215,18 @@ class TextProcessor:
         # Обработка форматирования
         text = re.sub(r'\s*--\s*', ' – ', text)
         text = re.sub(r'\s*##\s*', '\n\n', text)
-        
+
+        # Убираем Markdown-жирный/курсив
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **жирный**
+        text = re.sub(r'\*(.*?)\*', r'\1', text)      # *курсив*
+        text = re.sub(r'__([^_]+)__', r'\1', text)    # __подчёркнутый__
+
         # Финальная очистка
         text = text.strip()
         text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
         
         return text
+
 
     @staticmethod
     def safe_str(value: Any) -> str:
