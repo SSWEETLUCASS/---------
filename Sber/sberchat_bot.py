@@ -144,19 +144,7 @@ def idea_handler(update: UpdateMessage):
             template_text += f"🔹 {field}: {value if value else '—'}\n"
 
         bot.messaging.send_message(peer, template_text)
-
-        # 🚀 Сразу же передаём в AI-агент для оценки
-        try:
-            ai_prompt = ai_agent._generate_idea_prompt(
-                joined_data="",  # сюда можно подставить базу существующих идей
-                user_data=idea_data,
-                is_free_form=False  # так как шаблон уже собран
-            )
-            ai_response = ai_agent.ask(ai_prompt)
-            bot.messaging.send_message(peer, ai_response)
-        except Exception as e:
-            logging.error(f"Ошибка при передаче идеи в AI-агент: {e}")
-            bot.messaging.send_message(peer, "⚠️ Не удалось обработать идею в AI-агенте.")
+        bot.messaging.send_message(peer, "✨ Отлично! Мы можем дальше дорабатывать детали или перейти к оценке.")
     else:
         # Идея не полная → переходим к пошаговому уточнению
         user_states[user_id] = {
@@ -165,7 +153,6 @@ def idea_handler(update: UpdateMessage):
             "idea_data": {"raw_text": user_message}
         }
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
-
 
 
 
@@ -201,6 +188,8 @@ def agent_handler(update: UpdateMessage):
 def search_owners_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
+    text = update.message.text_message.text.strip()
+
     query = update.message.text.strip() if update.message and update.message.text else ""
 
     try:
