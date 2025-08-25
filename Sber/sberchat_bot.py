@@ -132,16 +132,19 @@ def idea_handler(update: UpdateMessage):
     matches, idea_data = check_completeness(user_message)
 
     if matches >= 5:
-        # Почти полная идея → уточняем у пользователя
+        # Почти полная идея → сразу формируем шаблон
         user_states[user_id] = {
-            "mode": config['states']['idea_free_form'],  # временно сохраняем как черновик
+            "mode": config['states']['idea_template'],
             "idea_data": idea_data
         }
-        bot.messaging.send_message(
-            peer,
-            "✅ Похоже, вы уже подробно описали идею.\n\n"
-            "Хотите, я сразу соберу её в шаблон, или уточним детали по шагам?"
-        )
+
+        # Формируем красивый вывод
+        template_text = "✅ Я собрал вашу идею в шаблон:\n\n"
+        for field, value in idea_data.items():
+            template_text += f"🔹 {field}: {value if value else '—'}\n"
+
+        bot.messaging.send_message(peer, template_text)
+        bot.messaging.send_message(peer, "✨ Отлично! Мы можем дальше дорабатывать детали или перейти к оценке.")
     else:
         # Идея не полная → переходим к пошаговому уточнению
         user_states[user_id] = {
@@ -150,6 +153,7 @@ def idea_handler(update: UpdateMessage):
             "idea_data": {"raw_text": user_message}
         }
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
+
 
 
 def agent_handler(update: UpdateMessage):
