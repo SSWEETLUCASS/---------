@@ -87,11 +87,12 @@ def start_handler(update: UpdateMessage):
 def idea_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
-    user_message = update.message.text.strip() if update.message and update.message.text else ""
+    # Безопасное извлечение текста
+    user_message = getattr(update.message, "text", "").strip()
 
     current_state = user_states.get(user_id, {})
 
-    # Если уже есть процесс идеи → считаем уточнением
+    # Если уже в процессе работы над идеей
     if current_state.get("mode") in [
         config['states']['idea_template'],
         config['states']['idea_free_form'],
@@ -112,14 +113,13 @@ def idea_handler(update: UpdateMessage):
         "Масштаб процесса"
     ]
 
-    # Функция проверки полноты идеи
-    def check_completeness(text: str) -> tuple[bool, dict]:
+    # Проверка заполненности идеи
+    def check_completeness(text: str) -> tuple[int, dict]:
         idea_data = {}
         matches = 0
         text_lower = text.lower()
 
         for field in template_fields:
-            # Условный поиск по ключевым словам
             key_words = field.lower().replace("?", "").replace("(", "").replace(")", "").split()
             if any(kw in text_lower for kw in key_words):
                 matches += 1
@@ -127,28 +127,30 @@ def idea_handler(update: UpdateMessage):
             else:
                 idea_data[field] = ""
 
-        # ≥5 заполненных пунктов считаем достаточным
-        return matches >= 5, idea_data
+        return matches, idea_data
 
-    # Проверяем заполненность
-    is_complete, idea_data = check_completeness(user_message)
+    matches, idea_data = check_completeness(user_message)
 
-    if is_complete:
+    if matches >= 5:
+        # Почти полная идея → уточняем у пользователя
         user_states[user_id] = {
-            "mode": config['states']['idea_template'],
+            "mode": config['states']['idea_free_form'],  # временно сохраняем как черновик
             "idea_data": idea_data
         }
-        bot.messaging.send_message(peer, f"✅ Отлично! Ваша идея уже хорошо проработана.\n\n"
-                                        f"📋 Я сформировал шаблон:\n\n" +
-                                        "\n".join([f"• {k}: {v if v else '—'}" for k, v in idea_data.items()]))
+        bot.messaging.send_message(
+            peer,
+            "✅ Похоже, вы уже подробно описали идею.\n\n"
+            "Хотите, я сразу соберу её в шаблон, или уточним детали по шагам?"
+        )
     else:
-        # Иначе пошаговое уточнение
+        # Идея не полная → переходим к пошаговому уточнению
         user_states[user_id] = {
             "mode": config['states']['idea_choose_format'],
             "current_field": 0,
             "idea_data": {"raw_text": user_message}
         }
         bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
+
 
 def agent_handler(update: UpdateMessage):
     peer = update.peer
