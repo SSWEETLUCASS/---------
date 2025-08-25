@@ -87,25 +87,68 @@ def start_handler(update: UpdateMessage):
 def idea_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
+    user_message = update.message.text.strip() if update.message and update.message.text else ""
+
     current_state = user_states.get(user_id, {})
 
-    # Если уже в процессе доработки идеи → не перескакиваем заново
+    # Если уже есть процесс идеи → считаем уточнением
     if current_state.get("mode") in [
         config['states']['idea_template'],
         config['states']['idea_free_form'],
         "cost_questions",
         "awaiting_detailed_cost_decision"
     ]:
-        bot.messaging.send_message(peer, "⚠️ Вы уже работаете над идеей, можете продолжить уточнение.")
+        bot.messaging.send_message(peer, "✍️ Продолжаем доработку вашей идеи...")
         return
 
-    # Иначе запускаем новый процесс
-    user_states[user_id] = {
-        "mode": config['states']['idea_choose_format'],
-        "current_field": 0,
-        "idea_data": {}
-    }
-    bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
+    # Поля шаблона
+    template_fields = [
+        "Название",
+        "Что хотим улучшить?",
+        "Какие данные поступают агенту на выход?",
+        "Как процесс выглядит сейчас? as-is",
+        "Какой результат нужен от агента?",
+        "Достижимый идеал(to-be)",
+        "Масштаб процесса"
+    ]
+
+    # Функция проверки полноты идеи
+    def check_completeness(text: str) -> tuple[bool, dict]:
+        idea_data = {}
+        matches = 0
+        text_lower = text.lower()
+
+        for field in template_fields:
+            # Условный поиск по ключевым словам
+            key_words = field.lower().replace("?", "").replace("(", "").replace(")", "").split()
+            if any(kw in text_lower for kw in key_words):
+                matches += 1
+                idea_data[field] = f"(Найдено в тексте) {text}"
+            else:
+                idea_data[field] = ""
+
+        # ≥5 заполненных пунктов считаем достаточным
+        return matches >= 5, idea_data
+
+    # Проверяем заполненность
+    is_complete, idea_data = check_completeness(user_message)
+
+    if is_complete:
+        user_states[user_id] = {
+            "mode": config['states']['idea_template'],
+            "idea_data": idea_data
+        }
+        bot.messaging.send_message(peer, f"✅ Отлично! Ваша идея уже хорошо проработана.\n\n"
+                                        f"📋 Я сформировал шаблон:\n\n" +
+                                        "\n".join([f"• {k}: {v if v else '—'}" for k, v in idea_data.items()]))
+    else:
+        # Иначе пошаговое уточнение
+        user_states[user_id] = {
+            "mode": config['states']['idea_choose_format'],
+            "current_field": 0,
+            "idea_data": {"raw_text": user_message}
+        }
+        bot.messaging.send_message(peer, config['bot_settings']['commands']['idea']['responses']['initial'])
 
 def agent_handler(update: UpdateMessage):
     peer = update.peer
@@ -139,6 +182,8 @@ def agent_handler(update: UpdateMessage):
 def search_owners_handler(update: UpdateMessage):
     peer = update.peer
     user_id = peer.id
+    query = update.message.text.strip() if update.message and update.message.text else ""
+
     try:
         agents_file_path = config['file_settings']['agents_file']
         if not os.path.exists(agents_file_path):
@@ -150,14 +195,35 @@ def search_owners_handler(update: UpdateMessage):
         headers = [cell.value for cell in sheet[1]]
         agents_data = [dict(zip(headers, row)) for row in sheet.iter_rows(min_row=2, values_only=True)]
 
+        # Фильтрация по запросу
+        results = []
+        if query:
+            query_lower = query.lower()
+            for agent in agents_data:
+                if any(query_lower in str(value).lower() for value in agent.values() if value):
+                    results.append(agent)
+
+        if results:
+            reply = "🔎 Найдено совпадений: {}\n\n".format(len(results))
+            for idx, agent in enumerate(results, start=1):
+                reply += f"👤 {idx}. {agent.get('Name', 'Без имени')}\n"
+                reply += f"📌 Описание: {agent.get('Description', '—')}\n"
+                reply += f"🏷 Теги: {agent.get('Tags', '—')}\n\n"
+        else:
+            reply = "❌ Ничего не найдено по вашему запросу."
+
+        # Сохраняем состояние
         user_states[user_id] = {
             "mode": config['states']['search_owners'],
             "agents_data": agents_data
         }
-        bot.messaging.send_message(peer, f"✅ Файл {os.path.basename(agents_file_path)} успешно загружен!\n\n💬 Теперь опишите свободно, что вас интересует...")
+
+        bot.messaging.send_message(peer, reply)
+
     except Exception as e:
         logging.error(f"Ошибка в search_owners_handler: {e}")
         bot.messaging.send_message(peer, config['error_messages']['general_error'].format(error=e))
+
 
 def consultation_handler(update: UpdateMessage):
     peer = update.peer
