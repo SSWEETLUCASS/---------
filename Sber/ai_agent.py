@@ -527,7 +527,6 @@ class GigaChatProcessor:
         """
 
     def _parse_free_form_data(self, response_text: str) -> Dict[str, str]:
-        """Парсинг данных из свободной формы ответа"""
         parsed_data = {}
         fields = [
             "Название", "Что хотим улучшить?", "Какие данные поступают агенту на выход?",
@@ -545,6 +544,9 @@ class GigaChatProcessor:
                 if match:
                     parsed_data[field] = match.group(1).strip()
                     break
+        
+        # 👇 добавляем флаг заполненности
+        parsed_data["_is_complete"] = all(parsed_data.get(f) for f in fields)
         
         return parsed_data
 
