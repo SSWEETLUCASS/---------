@@ -177,7 +177,6 @@ class TextProcessor:
             r"\s*id=.*$",
             r"\s*usage_metadata=.*$"
         ]
-        
         for pattern in metadata_patterns:
             text = re.sub(pattern, "", text, flags=re.DOTALL)
         
@@ -185,8 +184,6 @@ class TextProcessor:
         try:
             if isinstance(text, bytes):
                 text = text.decode('utf-8')
-            
-            # Исправляем поврежденную кодировку
             if 'Ð' in text or 'Ñ' in text:
                 try:
                     text = text.encode('latin-1').decode('utf-8')
@@ -202,7 +199,6 @@ class TextProcessor:
             '\\"': '"',
             "\\'": "'"
         }
-        
         for old, new in escape_replacements.items():
             text = text.replace(old, new)
         
@@ -216,10 +212,9 @@ class TextProcessor:
         text = re.sub(r'\s*--\s*', ' – ', text)
         text = re.sub(r'\s*##\s*', '\n\n', text)
 
-        # Убираем Markdown-жирный/курсив
-        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **жирный**
-        text = re.sub(r'\*(.*?)\*', r'\1', text)      # *курсив*
-        text = re.sub(r'__([^_]+)__', r'\1', text)    # __подчёркнутый__
+        #  Преобразуем Markdown-жирный и подчёркнутый в *текст*
+        text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)  # **жирный** → *жирный*
+        text = re.sub(r'__([^_]+)__', r'*\1*', text)    # __подчёркнутый__ → *подчёркнутый*
 
         # Финальная очистка
         text = text.strip()
